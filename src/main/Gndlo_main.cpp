@@ -13,6 +13,13 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <cv_bridge/cv_bridge.h>
 
+// Reconfigure params
+#include <memory>
+#include <regex>
+#include <rcl_interfaces/srv/set_parameters.hpp>
+#include <rcl_interfaces/msg/parameter.hpp>
+#include <rcl_interfaces/msg/set_parameters_result.hpp>
+
 
 using namespace Eigen;
 using namespace std;
@@ -36,17 +43,47 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 		this->declare_all_parameters();
 
 		// Save parameters in options
-		this->get_all_parameters();
+		this->get_all_parameters(); ///Por que se hace esta linea. Hacer el get no devuelve nada creo, no?
+		
+		/// Parameter event handler to reconfigure
+		param_handler_ = std::make_shared<rclcpp::ParameterEventHandler>(this);
+		
+		auto cb = [this](const rcl_interfaces::msg::ParameterEvent & event) { 
+		// Look for any updates to parameters in "/a_namespace" as well as any parameter changes 
+		// to our own node ("this_node") 
+			std::regex re("(/gndlo*)"); 
+			///cout << "Entra evento" << event.node << endl;
+			if (regex_match(event.node, re)) {
+			        // You can also use 'get_parameters_from_event' to enumerate all changes that came
+			        // in on this event
+			        auto params = rclcpp::ParameterEventHandler::get_parameters_from_event(event);
+			        for (auto & p : params) {
+				  RCLCPP_INFO(
+				    this->get_logger(),
+				    "cb3: Received an update to parameter \"%s\" of type: %s: \"%s\"",
+				    p.get_name().c_str(),
+				    p.get_type_name().c_str(),
+				    p.value_to_string().c_str());
+	    			    ///options.*(p.get_name().c_str()) = this->get_parameter(p.get_name().c_str()).get_parameter_value().get<p.get_type()>();
+				    auto it = optionsMap.find(p.get_name().c_str())
+				    if (it != optionsMap.end()){ options.*(it->second); }
+				    ///std::invoke(p.get_name().c_str(), options) = this->get_parameter(p.get_name().c_str()).get_parameter_value().get<p.get_type()>();
+			        }
+			        ///get_all_parameters();
+  			}
+		};
+		handle = param_handler_->add_parameter_event_callback(cb);
 
 		// Create publisher
 		pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("gndlo/odom_pose_cov", 10);
 		odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("gndlo/odom", 10);
+		///Que diferencia hay entre hacerlo asi y hacerlo como viene en la documentación? param_subscriber_ = std::make_shared<rclcpp::ParameterEventHandler>(this);
 
 		// Create subscription to image and info
 		topic = this->get_parameter("subs_topic").get_parameter_value().get<string>();
 		image_sub_.subscribe(this, topic + "/range/image");
     	info_sub_.subscribe(this, topic + "/range/sensor_info");
-
+    	
 		// Synchronize subscribers
 		sync_ = std::make_shared<message_filters::TimeSynchronizer<sensor_msgs::msg::Image, sensor_msgs::msg::LaserScan>>(image_sub_, info_sub_, 20);
     	sync_->registerCallback(std::bind(&GNDLO_Node::image_callback, this, std::placeholders::_1, std::placeholders::_2));
@@ -79,50 +116,132 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 	}
 
   private:
+  	template<typename T>
+	static const std::unordered_map<std::string, T Options::*> optionsMap = {
+		{"num_threads", &Options::num_threads},
+		{"valid_ratio", &Options::valid_ratio},
+		{"flag_verbose", &Options::flag_verbose},
+		{"flag_flat_blur", &Options::flag_flat_blur},
+		{"flag_solve_backforth", &Options::flag_solve_backforth},
+		{"flag_filter", &Options::flag_filter},
+		{"select_radius", &Options::select_radius},
+		{"gaussian_sigma", &Options::gaussian_sigma},
+		{"quadtrees_avg", &Options::quadtrees_avg},
+		{"quadtrees_std", &Options::quadtrees_std},
+		{"quadtrees_min_lvl", &Options::quadtrees_min_lvl},
+		{"quadtrees_max_lvl", &Options::quadtrees_max_lvl},
+		{"count_goal", &Options::count_goal},
+		{"starting_size", &Options::starting_size},
+		{"ground_threshold_deg", &Options::ground_threshold_deg},
+		{"wall_threshold_deg", &Options::wall_threshold_deg},
+		{"iterations", &Options::iterations},
+		{"huber_loss", &Options::huber_loss},
+		{"trans_bound", &Options::trans_bound},
+		{"pix_threshold", &Options::pix_threshold},
+		{"trans_threshold", &Options::trans_threshold},
+		{"rot_threshold", &Options::rot_threshold},
+		{"filter_kd", &Options::filter_kd},
+		{"filter_pd", &Options::filter_pd},
+		{"filter_kf", &Options::filter_kf},
+		{"filter_pf", &Options::filter_pf},
+		{"flag_save_results", &Options::flag_save_results},
+		{"results_file_name", &Options::results_file_name}
+    	};
+  
 	//------------------------------------
 	// PARAMETERS
 	//------------------------------------
   	// Declare parameters
 	void declare_all_parameters()
 	{
+		///Declaro el descriptor y el rango que voy a usar para los parametros
+		rcl_interfaces::msg::ParameterDescriptor descriptor;
+		rcl_interfaces::msg::IntegerRange range;
+		rcl_interfaces::msg::FloatingPointRange frange;
+		
 		// Declare parameters
 			// ROS topic to subscribe
 		this->declare_parameter("subs_topic", "/kitti");
 			// General
-		this->declare_parameter("num_threads", 8);
-		this->declare_parameter("valid_ratio", 0.8);
+		range.set__from_value(1).set__to_value(64).set__step(1);
+		descriptor.integer_range= {range};
+		this->declare_parameter("num_threads", 8, descriptor);
+		frange.set__from_value(0.0).set__to_value(1.0).set__step(0);
+		descriptor.floating_point_range= {frange};
+		this->declare_parameter("valid_ratio", 0.8, descriptor);
 			// Flags
 		this->declare_parameter("flag_verbose", true);
 		this->declare_parameter("flag_flat_blur", true);
 		this->declare_parameter("flag_solve_backforth", true);
 		this->declare_parameter("flag_filter", true);
 			// Gaussian filtering
-		this->declare_parameter("select_radius", 1);
-		this->declare_parameter("gaussian_sigma", 0.5);
+		range.set__from_value(0).set__to_value(15).set__step(1);
+		descriptor.integer_range= {range};
+		this->declare_parameter("select_radius", 6, descriptor);///Es un entero y no un float?
+		frange.set__from_value(-1.0).set__to_value(4.0).set__step(0);
+		descriptor.floating_point_range= {frange};
+		///cout << descriptor << endl;
+		this->declare_parameter("gaussian_sigma", 0.5, descriptor);
 			// Quadtree selection
-		this->declare_parameter("quadtrees_avg", 0.1);
-		this->declare_parameter("quadtrees_std", 0.015);
-		this->declare_parameter("quadtrees_min_lvl", 2);
-		this->declare_parameter("quadtrees_max_lvl", 5);
+		frange.set__from_value(0.0).set__to_value(2.0).set__step(0);
+		descriptor.floating_point_range= {frange};
+		this->declare_parameter("quadtrees_avg", 0.1, descriptor);
+		frange.set__from_value(0.0).set__to_value(2.0).set__step(0);
+		descriptor.floating_point_range= {frange};
+		this->declare_parameter("quadtrees_std", 0.015, descriptor);
+		range.set__from_value(1).set__to_value(5).set__step(1);
+		descriptor.integer_range= {range};
+		this->declare_parameter("quadtrees_min_lvl", 2, descriptor);
+		range.set__from_value(2).set__to_value(6).set__step(1);
+		descriptor.integer_range= {range};
+		this->declare_parameter("quadtrees_max_lvl", 5, descriptor);
 			// Orthog Culling
-		this->declare_parameter("count_goal", 50.);
-		this->declare_parameter("starting_size", 4);
+		frange.set__from_value(0.0).set__to_value(200.0).set__step(0);
+		descriptor.floating_point_range= {frange};
+		this->declare_parameter("count_goal", 50., descriptor);
+		range.set__from_value(0).set__to_value(100).set__step(1);
+		descriptor.integer_range= {range};
+		this->declare_parameter("starting_size", 4, descriptor);
 			// Ground clustering
-		this->declare_parameter("ground_threshold_deg", 10.);
-		this->declare_parameter("wall_threshold_deg", 60.);
+		frange.set__from_value(0.0).set__to_value(90.0).set__step(0);
+		descriptor.floating_point_range= {frange};
+		this->declare_parameter("ground_threshold_deg", 10., descriptor);
+		frange.set__from_value(0.0).set__to_value(90.0).set__step(0);
+		descriptor.floating_point_range= {frange};
+		this->declare_parameter("wall_threshold_deg", 60., descriptor);
 			// Solution
-		this->declare_parameter("iterations", 5);
-		this->declare_parameter("huber_loss", 3e-5);
-		this->declare_parameter("trans_bound", 1.);
+		range.set__from_value(1).set__to_value(30).set__step(1);
+		descriptor.integer_range= {range};
+		this->declare_parameter("iterations", 5, descriptor);
+		frange.set__from_value(0.0).set__to_value(5.0).set__step(0);
+		descriptor.floating_point_range= {frange};
+		this->declare_parameter("huber_loss", 3e-5, descriptor);
+		frange.set__from_value(0.0).set__to_value(200.0).set__step(0);
+		descriptor.floating_point_range= {frange};
+		this->declare_parameter("trans_bound", 1., descriptor);
 			// Convergence
-		this->declare_parameter("pix_threshold", 5.);
-		this->declare_parameter("trans_threshold", 0.002);
-		this->declare_parameter("rot_threshold", 0.5*(M_PI/180.));
+		frange.set__from_value(0.0).set__to_value(50.0).set__step(0);
+		descriptor.floating_point_range= {frange};
+		this->declare_parameter("pix_threshold", 5., descriptor);
+		frange.set__from_value(0.0).set__to_value(0.5).set__step(0);
+		descriptor.floating_point_range= {frange};
+		this->declare_parameter("trans_threshold", 0.002, descriptor);
+		frange.set__from_value(0.0).set__to_value(M_PI/90.0).set__step(0);
+		descriptor.floating_point_range= {frange};
+		this->declare_parameter("rot_threshold", 0.5*(M_PI/180.), descriptor);
 			// Filter
-		this->declare_parameter("filter_kd", 100.);
-		this->declare_parameter("filter_pd", 0.);
-		this->declare_parameter("filter_kf", 2.);
-		this->declare_parameter("filter_pf", 1.);
+		frange.set__from_value(0.0).set__to_value(2000.0).set__step(0);
+		descriptor.floating_point_range= {frange};
+		this->declare_parameter("filter_kd", 100., descriptor);
+		frange.set__from_value(0.0).set__to_value(12.0).set__step(0);
+		descriptor.floating_point_range= {frange};
+		this->declare_parameter("filter_pd", 0., descriptor);
+		frange.set__from_value(0.0).set__to_value(8.0).set__step(0);
+		descriptor.floating_point_range= {frange};
+		this->declare_parameter("filter_kf", 2., descriptor);
+		frange.set__from_value(0.0).set__to_value(4.0).set__step(0);
+		descriptor.floating_point_range= {frange};
+		this->declare_parameter("filter_pf", 1., descriptor);
 			// Output
 		this->declare_parameter("flag_save_results", true);
 		this->declare_parameter("results_file_name", "");
@@ -171,6 +290,10 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 		options.flag_save_results = this->get_parameter("flag_save_results").get_parameter_value().get<bool>();
 		options.results_file_name = this->get_parameter("results_file_name").get_parameter_value().get<string>();
 	}
+	
+	/// Reconfigure parameters
+	std::shared_ptr<rclcpp::ParameterEventHandler> param_handler_;
+  	std::shared_ptr<rclcpp::ParameterEventCallbackHandle> handle;
 
 
 	//------------------------------------
@@ -325,8 +448,8 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 	message_filters::Subscriber<sensor_msgs::msg::Image> image_sub_;
 	message_filters::Subscriber<sensor_msgs::msg::LaserScan> info_sub_;
 	std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::Image, sensor_msgs::msg::LaserScan>> sync_;
+	
 };
-
 
 // ------------------------------------------------------
 //						MAIN

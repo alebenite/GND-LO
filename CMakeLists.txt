@@ -41,7 +41,10 @@ find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(message_filters REQUIRED)
 find_package(cv_bridge REQUIRED)
-
+find_package(rcl_interfaces REQUIRED)
+###
+###find_package(dynamic_reconfigure REQUIRED)
+###generate_dynamic_reconfigure_options(cfg/my_config.cfg)
 
 # DEPENDENCIES
 # --------------------------------------
@@ -103,6 +106,9 @@ target_link_libraries(${ODOM_EXECUTABLE} ${OpenCV_LIBS} )
 ament_target_dependencies( ${ODOM_EXECUTABLE} Eigen3)
 ament_export_dependencies(eigen3_cmake_module)
 ament_export_dependencies(Eigen3)
+###rcl_interfaces std_msgs
+###ament_export_dependencies(rcl_interfaces std_msgs)
+###ament_target_dependencies(rclcpp rcl_interfaces std_msgs)
 include_directories(include ${EIGEN3_INCLUDE_DIR})
 
 #Use Ceres
