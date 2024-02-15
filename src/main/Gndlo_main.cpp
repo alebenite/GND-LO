@@ -13,12 +13,15 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <cv_bridge/cv_bridge.h>
 
-// Reconfigure params
+/// Reconfigure params
 #include <memory>
 #include <regex>
 #include <rcl_interfaces/srv/set_parameters.hpp>
 #include <rcl_interfaces/msg/parameter.hpp>
 #include <rcl_interfaces/msg/set_parameters_result.hpp>
+
+/// Patches
+#include "gndlo/msg/patches.hpp"
 
 
 using namespace Eigen;
@@ -65,8 +68,9 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 				    p.get_type_name().c_str(),
 				    p.value_to_string().c_str());
 	    			    ///options.*(p.get_name().c_str()) = this->get_parameter(p.get_name().c_str()).get_parameter_value().get<p.get_type()>();
-				    auto it = optionsMap.find(p.get_name().c_str())
-				    if (it != optionsMap.end()){ options.*(it->second); }
+	    			    ///cout << optionsMap<double Options::*>.find("count_goal") << endl;
+				    ///auto it = optionsMap<double GNDLO::Options::*>::find("count_goal");
+				    ///if (it != optionsMap.end()){ options.*(it->second) = this->get_parameter(p.get_name()).get_parameter_value().get<p.get_type()>(); }
 				    ///std::invoke(p.get_name().c_str(), options) = this->get_parameter(p.get_name().c_str()).get_parameter_value().get<p.get_type()>();
 			        }
 			        ///get_all_parameters();
@@ -289,11 +293,14 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 			// Output
 		options.flag_save_results = this->get_parameter("flag_save_results").get_parameter_value().get<bool>();
 		options.results_file_name = this->get_parameter("results_file_name").get_parameter_value().get<string>();
-	}
+	}--symlink-install
 	
 	/// Reconfigure parameters
 	std::shared_ptr<rclcpp::ParameterEventHandler> param_handler_;
   	std::shared_ptr<rclcpp::ParameterEventCallbackHandle> handle;
+  	///
+	gndlo::msg::Patches parche = gndlo::msg::Patches();
+
 
 
 	//------------------------------------
@@ -435,7 +442,7 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 	Eigen::Matrix4f odom_pose;
 	Eigen::MatrixXf odom_cov;
 	GNDLO_Lidar::SensorInfo sensor;
-
+	
 	// Output results file
 	ofstream results_file;
 

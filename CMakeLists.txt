@@ -32,9 +32,9 @@ endif(1)
 # --------------------------------------
 # ROS packages
 find_package(ament_cmake REQUIRED)
-find_package(ament_cmake_python REQUIRED)
+###find_package(ament_cmake_python REQUIRED)
 find_package(rclcpp REQUIRED)
-find_package(rclpy REQUIRED)
+###find_package(rclpy REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
@@ -42,6 +42,8 @@ find_package(nav_msgs REQUIRED)
 find_package(message_filters REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(rcl_interfaces REQUIRED)
+find_package(rosidl_default_generators REQUIRED) ###
+###find_package(tutorial_interfaces REQUIRED) ###
 ###
 ###find_package(dynamic_reconfigure REQUIRED)
 ###generate_dynamic_reconfigure_options(cfg/my_config.cfg)
@@ -80,6 +82,14 @@ ${PROJECT_SOURCE_DIR}/src/Gndlo_ground.cpp)
 file( GLOB LIB_HEADERS ${PROJECT_SOURCE_DIR}/include/${PROJECT_NAME}/*.h )
 
 
+### CREATE THE PATCHES MESSAGE
+# --------------------------------------
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/Patches.msg"
+  DEPENDENCIES std_msgs ### std_msgs/Header
+)
+
+
 # CREATE EXECUTABLES
 # --------------------------------------
 set(ODOM_EXECUTABLE "${PROJECT_NAME}_odom")
@@ -97,6 +107,14 @@ ament_target_dependencies( ${ODOM_EXECUTABLE}
 		nav_msgs
 		message_filters
 		cv_bridge)
+		
+#Target custom messages
+###rosidl_target_interfaces(${ODOM_EXECUTABLE} ${PROJECT_NAME} "rosidl_typesupport_cpp")
+rosidl_get_typesupport_target(${ODOM_EXECUTABLE} ${PROJECT_NAME} "rosidl_typesupport_cpp")
+
+
+target_link_libraries(${ODOM_EXECUTABLE} ${PROJECT_NAME}__rosidl_typesupport_cpp)
+
 
 #Use OpenCV
 include_directories(${OpenCV_INCLUDE_DIRS})
