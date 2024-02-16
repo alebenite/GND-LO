@@ -366,6 +366,8 @@ public:
     inline void getCovariance(Eigen::MatrixXf &outcov) {outcov = twcov.cov;}
      // Get total pose wrt world
     inline void getPose(Eigen::Matrix4f &pose) {pose = pose_t;}
+	 /// Get actual patch
+	inline void getPatches(SizedData &patch) {patch = szdata1;}
 
 
     //Constructor. Initialize variables and matrix sizes

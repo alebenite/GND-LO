@@ -558,5 +558,4 @@ void GNDLO::runOdometry()
 
 	// Save breakdown of times
 	avg_time_bd = (avg_time_bd*(number_frames-1) + elapsed_times)/number_frames;
-
 }
