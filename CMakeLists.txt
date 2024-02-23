@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.5)
 project(gndlo)
 
 ## Set CXX optimization flags
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0 -std=c++11")
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wpedantic -Wall -Wextra")
 ## -mtune=native -march=native
 
@@ -42,6 +42,7 @@ find_package(nav_msgs REQUIRED)
 find_package(message_filters REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(rcl_interfaces REQUIRED)
+find_package(OpenCV REQUIRED) ###
 find_package(rosidl_default_generators REQUIRED) ###
 ###find_package(tutorial_interfaces REQUIRED) ###
 ###
@@ -94,6 +95,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 # --------------------------------------
 set(ODOM_EXECUTABLE "${PROJECT_NAME}_odom")
 add_executable(${ODOM_EXECUTABLE} ${PROJECT_SOURCE_DIR}/src/main/Gndlo_main.cpp ${LIB_SOURCES} ${LIB_HEADERS})
+add_executable(Gndlo_image_formation ${PROJECT_SOURCE_DIR}/src/Gndlo_image_formation.cpp)
 set_target_properties(${ODOM_EXECUTABLE} PROPERTIES INSTALL_RPATH_USE_LINK_PATH TRUE)
 
 # TARGET AND LINK
@@ -107,6 +109,18 @@ ament_target_dependencies( ${ODOM_EXECUTABLE}
 		nav_msgs
 		message_filters
 		cv_bridge)
+
+ament_target_dependencies(Gndlo_image_formation
+		rclcpp
+		sensor_msgs
+		std_msgs
+		geometry_msgs
+		nav_msgs
+		message_filters
+		cv_bridge
+		Eigen3
+		OpenCV
+)
 		
 #Target custom messages
 ###rosidl_target_interfaces(${ODOM_EXECUTABLE} ${PROJECT_NAME} "rosidl_typesupport_cpp")
@@ -124,6 +138,7 @@ target_link_libraries(${ODOM_EXECUTABLE} ${OpenCV_LIBS} )
 ament_target_dependencies( ${ODOM_EXECUTABLE} Eigen3)
 ament_export_dependencies(eigen3_cmake_module)
 ament_export_dependencies(Eigen3)
+
 ###rcl_interfaces std_msgs
 ###ament_export_dependencies(rcl_interfaces std_msgs)
 ###ament_target_dependencies(rclcpp rcl_interfaces std_msgs)
@@ -132,6 +147,8 @@ include_directories(include ${EIGEN3_INCLUDE_DIR})
 #Use Ceres
 include_directories(${CERES_INCLUDE_DIRS})
 target_link_libraries(${ODOM_EXECUTABLE} ${CERES_LIBRARIES})
+###
+target_link_libraries(Gndlo_image_formation ${PROJECT_NAME}__rosidl_typesupport_cpp ${OpenCV_LIBS} ${CERES_LIBRARIES})
 
 
 # INSTALL
@@ -141,6 +158,8 @@ install(TARGETS ${ODOM_EXECUTABLE}
     LIBRARY DESTINATION lib/${PROJECT_NAME}
     RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
+###
+install(TARGETS Gndlo_image_formation DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY launch
   DESTINATION share/${PROJECT_NAME})

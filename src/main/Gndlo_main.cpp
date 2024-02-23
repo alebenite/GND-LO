@@ -492,7 +492,7 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 	// VARIABLES
 	//------------------------------------
 	// Variables
-	string topic = "/kitti";
+	string topic = "/ouster";
 	bool first_data = true;
 	Eigen::MatrixXf input_img;
 	Eigen::Matrix4f odom_pose;

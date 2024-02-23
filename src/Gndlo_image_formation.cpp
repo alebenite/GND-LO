@@ -1,17 +1,12 @@
-#include "Gndlo.h"
-#include "Gndlo_Lidar.h"
-
 // ROS
 #include <rclcpp/rclcpp.hpp>
 #include <message_filters/subscriber.h>
-#include <message_filters/time_synchronizer.h>
-#include <sensor_msgs/msg/laser_scan.hpp>
-#include <sensor_msgs/msg/image.hpp>
-#include <geometry_msgs/msg/transform_stamped.hpp>
-#include <geometry_msgs/msg/pose_stamped.hpp>
-#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
-#include <nav_msgs/msg/odometry.hpp>
+//#include <message_filters/time_synchronizer.h>
+//#include <sensor_msgs/pointcloud2.hpp>
+#include "/opt/ros/humble/include/sensor_msgs/sensor_msgs/msg/point_cloud2.hpp"
+#include "/opt/ros/humble/include/sensor_msgs/sensor_msgs/point_cloud2_iterator.hpp"
 #include <cv_bridge/cv_bridge.h>
+#include <opencv2/highgui/highgui.hpp>
 
 /// Reconfigure params
 #include <memory>
@@ -20,143 +15,53 @@
 #include <rcl_interfaces/msg/parameter.hpp>
 #include <rcl_interfaces/msg/set_parameters_result.hpp>
 
-/// Patches
-#include "gndlo/msg/patches.hpp"
 
-
-using namespace Eigen;
+//using namespace Eigen;
 using namespace std;
 
 
 // ------------------------------------------------------
 //						CLASS
 // ------------------------------------------------------
-class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
+class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 {
   public:
 	// Constructor
-    GNDLO_Node()
-    : Node("gndlo_node")
+    Cloud2Depth_Node()
+    : Node("cloud2depth")
 	{
-		// Initialize variables
-		odom_pose = Matrix4f::Identity();
-		odom_cov = MatrixXf::Zero(6,6);
-
 		// Declare parameters
 		this->declare_all_parameters();
 
 		// Save parameters in options
-		this->get_all_parameters(); ///Por que se hace esta linea. Hacer el get no devuelve nada creo, no?
+		this->get_all_parameters();
 		
-		/// Parameter event handler to reconfigure
-		param_handler_ = std::make_shared<rclcpp::ParameterEventHandler>(this);
-		
-		auto cb = [this](const rcl_interfaces::msg::ParameterEvent & event) { 
-		// Look for any updates to parameters in "/a_namespace" as well as any parameter changes 
-		// to our own node ("this_node") 
-			std::regex re("(/gndlo*)"); 
-			///cout << "Entra evento" << event.node << endl;
-			if (regex_match(event.node, re)) {
-			        // You can also use 'get_parameters_from_event' to enumerate all changes that came
-			        // in on this event
-			        auto params = rclcpp::ParameterEventHandler::get_parameters_from_event(event);
-			        for (auto & p : params) {
-				  RCLCPP_INFO(
-				    this->get_logger(),
-				    "cb3: Received an update to parameter \"%s\" of type: %s: \"%s\"",
-				    p.get_name().c_str(),
-				    p.get_type_name().c_str(),
-				    p.value_to_string().c_str());
-	    			    ///options.*(p.get_name().c_str()) = this->get_parameter(p.get_name().c_str()).get_parameter_value().get<p.get_type()>();
-	    			    ///cout << optionsMap<double Options::*>.find("count_goal") << endl;
-				    ///auto it = optionsMap<double GNDLO::Options::*>::find("count_goal");
-				    ///if (it != optionsMap.end()){ options.*(it->second) = this->get_parameter(p.get_name()).get_parameter_value().get<p.get_type()>(); }
-				    ///std::invoke(p.get_name().c_str(), options) = this->get_parameter(p.get_name().c_str()).get_parameter_value().get<p.get_type()>();
-			        }
-			        ///get_all_parameters();
-  			}
-		};
-		handle = param_handler_->add_parameter_event_callback(cb);
-
 		// Create publisher
-		pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("gndlo/odom_pose_cov", 10);
-		odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("gndlo/odom", 10);
-		///Que diferencia hay entre hacerlo asi y hacerlo como viene en la documentación? param_subscriber_ = std::make_shared<rclcpp::ParameterEventHandler>(this);
-		ptch_pub_ = this->create_publisher<gndlo::msg::Patches>("gndlo/patches", 10);
-
-		// Create subscription to image and info
 		topic = this->get_parameter("subs_topic").get_parameter_value().get<string>();
-		image_sub_.subscribe(this, topic + "/range/image");
-    	info_sub_.subscribe(this, topic + "/range/sensor_info");
+		depth_pub_ = this->create_publisher<sensor_msgs::msg::Image>(topic + "/range/image", 10);
+
+		//Creation of the QoS Polices
+		rclcpp::QoS qos(rclcpp::KeepLast(10));
+    	qos.reliability(RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT);
+
+		// Create subscription to the cloud point
+		///cloud_sub_.subscribe(this, topic + "/cloud");
+		cloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(topic + "/points", qos, std::bind(&Cloud2Depth_Node::cloud_callback, this, std::placeholders::_1));
+    	//cloud_sub_.subscribe(this, "/cloud");
+		//cloud_sub_->registerCallback(std::bind(&Cloud2Depth_Node::cloud_callback, this, std::placeholders::_1, std::placeholders::_2));
+		//cloud_sub_.subscribe("/cloud", 10)
+		//info_sub_.subscribe(this, topic + "/range/sensor_info");
+		
     	
 		// Synchronize subscribers
-		sync_ = std::make_shared<message_filters::TimeSynchronizer<sensor_msgs::msg::Image, sensor_msgs::msg::LaserScan>>(image_sub_, info_sub_, 20);
-    	sync_->registerCallback(std::bind(&GNDLO_Node::image_callback, this, std::placeholders::_1, std::placeholders::_2));
+		//sync_ = std::make_shared<message_filters::TimeSynchronizer<sensor_msgs::msg::Image, sensor_msgs::msg::LaserScan>>(image_sub_, info_sub_, 20);
+    	//sync_->registerCallback(std::bind(&GNDLO_Node::image_callback, this, std::placeholders::_1, std::placeholders::_2));
 
-		// Open file to save results
-		if (options.flag_save_results)
-		{
-			if (options.results_file_name.size() < 5)
-			{
-				RCLCPP_WARN(this->get_logger(), "Invalid name for results file: ");
-				RCLCPP_WARN(this->get_logger(), options.results_file_name.c_str());
-				options.flag_save_results = false;
-			}
-			else
-			{
-				if (options.flag_verbose)
-					RCLCPP_INFO(this->get_logger(), "Saving results to ");
-					RCLCPP_INFO(this->get_logger(), options.results_file_name.c_str());
-				results_file.open(options.results_file_name);
-			}
-		}
     }
 
-	// Destructor
-	~GNDLO_Node()
-	{
-		// Ensure results file is closed
-		if (results_file.is_open())
-			results_file.close();
-	}
-
   private:
-  	template<typename T>
-	static const std::unordered_map<std::string, T Options::*> optionsMap = {
-		{"num_threads", &Options::num_threads},
-		{"valid_ratio", &Options::valid_ratio},
-		{"flag_verbose", &Options::flag_verbose},
-		{"flag_flat_blur", &Options::flag_flat_blur},
-		{"flag_solve_backforth", &Options::flag_solve_backforth},
-		{"flag_filter", &Options::flag_filter},
-		{"select_radius", &Options::select_radius},
-		{"gaussian_sigma", &Options::gaussian_sigma},
-		{"quadtrees_avg", &Options::quadtrees_avg},
-		{"quadtrees_std", &Options::quadtrees_std},
-		{"quadtrees_min_lvl", &Options::quadtrees_min_lvl},
-		{"quadtrees_max_lvl", &Options::quadtrees_max_lvl},
-		{"count_goal", &Options::count_goal},
-		{"starting_size", &Options::starting_size},
-		{"ground_threshold_deg", &Options::ground_threshold_deg},
-		{"wall_threshold_deg", &Options::wall_threshold_deg},
-		{"iterations", &Options::iterations},
-		{"huber_loss", &Options::huber_loss},
-		{"trans_bound", &Options::trans_bound},
-		{"pix_threshold", &Options::pix_threshold},
-		{"trans_threshold", &Options::trans_threshold},
-		{"rot_threshold", &Options::rot_threshold},
-		{"filter_kd", &Options::filter_kd},
-		{"filter_pd", &Options::filter_pd},
-		{"filter_kf", &Options::filter_kf},
-		{"filter_pf", &Options::filter_pf},
-		{"flag_save_results", &Options::flag_save_results},
-		{"results_file_name", &Options::results_file_name}
-    	};
-  
-	//------------------------------------
-	// PARAMETERS
-	//------------------------------------
-  	// Declare parameters
+	
+
 	void declare_all_parameters()
 	{
 		///Declaro el descriptor y el rango que voy a usar para los parametros
@@ -166,354 +71,163 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 		
 		// Declare parameters
 			// ROS topic to subscribe
-		this->declare_parameter("subs_topic", "/kitti");
-			// General
-		range.set__from_value(1).set__to_value(64).set__step(1);
+		this->declare_parameter("subs_topic", "/ouster");
+		
+		range.set__from_value(1).set__to_value(5000).set__step(1);
 		descriptor.integer_range= {range};
-		this->declare_parameter("num_threads", 8, descriptor);
-		frange.set__from_value(0.0).set__to_value(1.0).set__step(0);
-		descriptor.floating_point_range= {frange};
-		this->declare_parameter("valid_ratio", 0.8, descriptor);
-			// Flags
-		this->declare_parameter("flag_verbose", true);
-		this->declare_parameter("flag_flat_blur", true);
-		this->declare_parameter("flag_solve_backforth", true);
-		this->declare_parameter("flag_filter", true);
-			// Gaussian filtering
-		range.set__from_value(0).set__to_value(15).set__step(1);
+		this->declare_parameter("width", 1024, descriptor);
+		range.set__from_value(1).set__to_value(150).set__step(1);
 		descriptor.integer_range= {range};
-		this->declare_parameter("select_radius", 6, descriptor);///Es un entero y no un float?
-		frange.set__from_value(-1.0).set__to_value(4.0).set__step(0);
-		descriptor.floating_point_range= {frange};
-		///cout << descriptor << endl;
-		this->declare_parameter("gaussian_sigma", 0.5, descriptor);
-			// Quadtree selection
-		frange.set__from_value(0.0).set__to_value(2.0).set__step(0);
-		descriptor.floating_point_range= {frange};
-		this->declare_parameter("quadtrees_avg", 0.1, descriptor);
-		frange.set__from_value(0.0).set__to_value(2.0).set__step(0);
-		descriptor.floating_point_range= {frange};
-		this->declare_parameter("quadtrees_std", 0.015, descriptor);
-		range.set__from_value(1).set__to_value(5).set__step(1);
-		descriptor.integer_range= {range};
-		this->declare_parameter("quadtrees_min_lvl", 2, descriptor);
-		range.set__from_value(2).set__to_value(6).set__step(1);
-		descriptor.integer_range= {range};
-		this->declare_parameter("quadtrees_max_lvl", 5, descriptor);
-			// Orthog Culling
-		frange.set__from_value(0.0).set__to_value(200.0).set__step(0);
-		descriptor.floating_point_range= {frange};
-		this->declare_parameter("count_goal", 50., descriptor);
-		range.set__from_value(0).set__to_value(100).set__step(1);
-		descriptor.integer_range= {range};
-		this->declare_parameter("starting_size", 4, descriptor);
-			// Ground clustering
-		frange.set__from_value(0.0).set__to_value(90.0).set__step(0);
-		descriptor.floating_point_range= {frange};
-		this->declare_parameter("ground_threshold_deg", 10., descriptor);
-		frange.set__from_value(0.0).set__to_value(90.0).set__step(0);
-		descriptor.floating_point_range= {frange};
-		this->declare_parameter("wall_threshold_deg", 60., descriptor);
-			// Solution
-		range.set__from_value(1).set__to_value(30).set__step(1);
-		descriptor.integer_range= {range};
-		this->declare_parameter("iterations", 5, descriptor);
-		frange.set__from_value(0.0).set__to_value(5.0).set__step(0);
-		descriptor.floating_point_range= {frange};
-		this->declare_parameter("huber_loss", 3e-5, descriptor);
-		frange.set__from_value(0.0).set__to_value(200.0).set__step(0);
-		descriptor.floating_point_range= {frange};
-		this->declare_parameter("trans_bound", 1., descriptor);
-			// Convergence
-		frange.set__from_value(0.0).set__to_value(50.0).set__step(0);
-		descriptor.floating_point_range= {frange};
-		this->declare_parameter("pix_threshold", 5., descriptor);
-		frange.set__from_value(0.0).set__to_value(0.5).set__step(0);
-		descriptor.floating_point_range= {frange};
-		this->declare_parameter("trans_threshold", 0.002, descriptor);
-		frange.set__from_value(0.0).set__to_value(M_PI/90.0).set__step(0);
-		descriptor.floating_point_range= {frange};
-		this->declare_parameter("rot_threshold", 0.5*(M_PI/180.), descriptor);
-			// Filter
-		frange.set__from_value(0.0).set__to_value(2000.0).set__step(0);
-		descriptor.floating_point_range= {frange};
-		this->declare_parameter("filter_kd", 100., descriptor);
-		frange.set__from_value(0.0).set__to_value(12.0).set__step(0);
-		descriptor.floating_point_range= {frange};
-		this->declare_parameter("filter_pd", 0., descriptor);
-		frange.set__from_value(0.0).set__to_value(8.0).set__step(0);
-		descriptor.floating_point_range= {frange};
-		this->declare_parameter("filter_kf", 2., descriptor);
-		frange.set__from_value(0.0).set__to_value(4.0).set__step(0);
-		descriptor.floating_point_range= {frange};
-		this->declare_parameter("filter_pf", 1., descriptor);
-			// Output
-		this->declare_parameter("flag_save_results", true);
-		this->declare_parameter("results_file_name", "");
+		this->declare_parameter("height", 32, descriptor);
 	}
 
 	// Get parameters
 	void get_all_parameters()
 	{
 		// Set options
-			// General
-		options.num_threads = this->get_parameter("num_threads").get_parameter_value().get<int>();
-		options.valid_ratio = this->get_parameter("valid_ratio").get_parameter_value().get<double>();
-			// Flags
-		options.flag_verbose = this->get_parameter("flag_verbose").get_parameter_value().get<bool>();
-		options.flag_flat_blur = this->get_parameter("flag_flat_blur").get_parameter_value().get<bool>();
-		options.flag_solve_backforth = this->get_parameter("flag_solve_backforth").get_parameter_value().get<bool>();
-		options.flag_filter = this->get_parameter("flag_filter").get_parameter_value().get<bool>();
-			// Gaussian filtering
-		options.select_radius = this->get_parameter("select_radius").get_parameter_value().get<int>();
-		options.gaussian_sigma = this->get_parameter("gaussian_sigma").get_parameter_value().get<double>();
-			// Quadtree selection
-		options.quadtrees_avg = this->get_parameter("quadtrees_avg").get_parameter_value().get<double>();
-		options.quadtrees_std = this->get_parameter("quadtrees_std").get_parameter_value().get<double>();
-		options.quadtrees_min_lvl = this->get_parameter("quadtrees_min_lvl").get_parameter_value().get<int>();
-		options.quadtrees_max_lvl = this->get_parameter("quadtrees_max_lvl").get_parameter_value().get<int>();
-			// Orthog Culling
-		options.count_goal = this->get_parameter("count_goal").get_parameter_value().get<double>();
-		options.starting_size = this->get_parameter("starting_size").get_parameter_value().get<int>();
-			// Ground clustering
-		options.ground_threshold_deg = this->get_parameter("ground_threshold_deg").get_parameter_value().get<double>();
-		options.wall_threshold_deg = this->get_parameter("wall_threshold_deg").get_parameter_value().get<double>();
-			// Solution
-		options.iterations = this->get_parameter("iterations").get_parameter_value().get<int>();
-		options.huber_loss = this->get_parameter("huber_loss").get_parameter_value().get<double>();
-		options.trans_bound = this->get_parameter("trans_bound").get_parameter_value().get<double>();
-			// Convergence
-		options.pix_threshold = this->get_parameter("pix_threshold").get_parameter_value().get<double>();
-		options.trans_threshold = this->get_parameter("trans_threshold").get_parameter_value().get<double>();
-		options.rot_threshold = this->get_parameter("rot_threshold").get_parameter_value().get<double>();
-			// Filter
-		options.filter_kd = this->get_parameter("filter_kd").get_parameter_value().get<double>();
-		options.filter_pd = this->get_parameter("filter_pd").get_parameter_value().get<double>();
-		options.filter_kf = this->get_parameter("filter_kf").get_parameter_value().get<double>();
-		options.filter_pf = this->get_parameter("filter_pf").get_parameter_value().get<double>();
-			// Output
-		options.flag_save_results = this->get_parameter("flag_save_results").get_parameter_value().get<bool>();
-		options.results_file_name = this->get_parameter("results_file_name").get_parameter_value().get<string>();
-	}
-	
-	/// Reconfigure parameters
-	std::shared_ptr<rclcpp::ParameterEventHandler> param_handler_;
-  	std::shared_ptr<rclcpp::ParameterEventCallbackHandle> handle;
-  	///
-	gndlo::msg::Patches parche = gndlo::msg::Patches();
-
-
-
-	//------------------------------------
-	// PUBLISHER
-	//------------------------------------
-	// Publish Pose with Covariance
-	void publish_odometry(const std_msgs::msg::Header & header, const Eigen::Matrix4f & pose, const Eigen::MatrixXf & cov)
-	{
-		// Create message PoseWithCovarianceStamped
-		auto message = geometry_msgs::msg::PoseWithCovarianceStamped();
-			// Set header
-		message.header = header;
-		message.header.frame_id = "world";
-			// Set pose
-		Eigen::Quaternionf quat(pose.block<3,3>(0,0));
-		message.pose.pose.position.x = pose(0,3);
-		message.pose.pose.position.y = pose(1,3);
-		message.pose.pose.position.z = pose(2,3);
-		message.pose.pose.orientation.x = quat.x();
-		message.pose.pose.orientation.y = quat.y();
-		message.pose.pose.orientation.z = quat.z();
-		message.pose.pose.orientation.w = quat.w();
-			// Set covariance
-		Map<Matrix<double, 6, 6, RowMajor>>(begin(message.pose.covariance)) = cov.cast<double>();
-
-		// Create odometry message
-		auto odom_msg = nav_msgs::msg::Odometry();
-			// Set header
-		odom_msg.header = header;
-		odom_msg.header.frame_id = "world";
-		odom_msg.child_frame_id = "lidar";
-			// Set pose as above
-		odom_msg.pose = message.pose;
-
-		// Publish
-		pose_pub_->publish(message);
-		odom_pub_->publish(odom_msg);
+		width = this->get_parameter("width").get_parameter_value().get<int>();
+		height = this->get_parameter("height").get_parameter_value().get<int>();
 	}
 
-	/// Publish Patch
-	void publish_patches(const std_msgs::msg::Header & header, const SizedData & szdata){ ///Se puede mejorar inicializando los vectores con tamaño conocido e insertando
-		/// Create the patch message
-		auto patch = gndlo::msg::Patches();
-			/// Set header
-		patch.header = header;
-		patch.header.frame_id = "world";
-			/// Set centers
-		std::vector<float> centers;
-		for (const auto& center : szdata.centers){
-			centers.push_back(center(0));
-			centers.push_back(center(1));
-			centers.push_back(center(2));
-		}
-		patch.centers = centers;
-			/// Set normals
-		std::vector<float> normals;
-		for (const auto& normal : szdata.normals){
-			normals.push_back(normal(0));
-			normals.push_back(normal(1));
-			normals.push_back(normal(2));
-		}
-		patch.normals = normals;
-			/// Set covars
-		std::vector<float> covars;
-		for (const auto& covar : szdata.covars) {
-			for (int i = 0; i < covar.rows(); ++i) {
-				for (int j = 0; j < covar.cols(); ++j) {
-					covars.push_back(covar(i, j));
+	//------------------------------------
+	// Point cloud callback
+	//------------------------------------
+    void cloud_callback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& cloud_msg){
+		cout << "Nube de puntos recibido" << endl;
+    		if (true){ //Futuro flag creo
+    			header = cloud_msg->header;
+
+				auto depth_msg = sensor_msgs::msg::Image();
+				cv_bridge::CvImage cv_depth;
+				cout << "1111111111111111111" << endl;
+				//Inicialize de depth image as a matrix of 0's
+				cv::Mat algo (height, width, CV_32FC1, cv::Scalar(0.0));
+				algo.copyTo(cv_depth.image); //= cv::Mat(height, width, CV_32FC1, cv::Scalar(0.0));
+				//Iterate over all the points.
+				sensor_msgs::PointCloud2ConstIterator<float> iter_x(*cloud_msg, "x");
+				std::vector<float> ranges; 
+				std::vector<float> alphas;			
+				std::vector<float> betas;
+				//std::vector<int> pixel_x;
+				//std::vector<int> pixel_y;
+				cout << "222222222222222" << endl;
+				//Se puede quitar un for calculando primero left right... sabiendo que posiciones mirar directamente... o no
+				for(; iter_x != iter_x.end(); ++iter_x){
+					float x = iter_x[0];
+					float y = iter_x[1];
+					float z = iter_x[2];
+					//cout << "(" << x << ", " << y << ", " << z << ")" << endl;
+
+					float denominator = std::sqrt(x*x + y*y + z*z); //If denominator equals 0 means that x and y and z are 0 which means that is a non usefull observation
+					if (denominator != 0){
+						ranges.push_back(std::sqrt(x*x + y*y + z*z)); 					//√x²+y²+z²
+						alphas.push_back(std::atan2(y, x)); 							//arctan(y/x)
+						if(std::abs(z/denominator) <= 1.0){
+							betas.push_back(std::acos(z/(std::sqrt(x*x + y*y + z*z))));	//arccos(z/range)
+						} else {
+							betas.push_back(0.0); ///No se que control hay que hacer aquí
+						}
+					}
+					///cout << std::asin(z/(std::sqrt(x*x + y*y + z*z))) << endl;
 				}
-			}
-    	}
-		patch.covars = covars;
-			/// Set weights
-		patch.weights = szdata.fitnesses;
-			/// Set labels
-		patch.labels = szdata.labels;
-			/// Set sizes
-		patch.sizes = szdata.sizes;
-			/// Set pixels
-		std::vector<int> pixels;
-		for (const auto& pixel : szdata.px0){
-			pixels.push_back(pixel(0));
-			pixels.push_back(pixel(1));
-		}
-		patch.pixels = pixels;
+				cout << "Calculado rango, y angulos" << endl;
+				//posible control de tamaño de vector
+				float left = *std::min_element(alphas.begin(), alphas.end());//alphas[0];
+				float right = alphas[alphas.size() - 1];
+				float top = *std::min_element(betas.begin(), betas.end());//betas[0]; //mirar si es con primero y ultimo o con max y min
+				float down = betas[betas.size() - 1];
 
-		///Publish the patch
-		ptch_pub_->publish(patch);
-	}
+				float range_horizontal = *std::max_element(alphas.begin(), alphas.end()) - *std::min_element(alphas.begin(), alphas.end());	//right - left;
+				float range_vertical = *std::max_element(betas.begin(), betas.end()) - *std::min_element(betas.begin(), betas.end()); 		//top-down;
+				for (int i=0; i<betas.size();i++){
+					//cout << i << ": " << ranges[i] << ", " << alphas[i] << ", " << betas[i]<< endl;
+				}
+				//cout << "Horizontal: " << range_horizontal << ", (" << *std::min_element(alphas.begin(), alphas.end()) << ", " << *std::max_element(alphas.begin(), alphas.end()) << ")" << endl;
+				//cout << "Vertical: " <<  range_vertical << ", (" << *std::min_element(betas.begin(), betas.end()) << ", " << *std::max_element(betas.begin(), betas.end()) << ")" << endl;
+				for (int i = 0; i < ranges.size(); i++){
+					int pixel_x = static_cast<int>((alphas[i]-left)/range_horizontal * width);
+					int pixel_y = static_cast<int>((betas[i]-top)/range_vertical * height);
+					if (alphas[i]-left == 0) {
+						pixel_x = 0;
+					}
+					if (betas[i]-top == 0) {
+						pixel_y = 0;
+					}
+					
+					//cv_depth.image(pixel_x, pixel_y) = ranges[i];
+					/*cout << "Iteracion " << i << " de " << ranges.size() << endl;
+					cout << "El pixel_x es " <<pixel_x << ", " << alphas[i]-left << " " << (alphas[i]-left)/range_horizontal << " " << (alphas[i]-left)/range_horizontal * width << endl;
+					cout << "El pixel_y es " <<pixel_y << ", " << betas[i]-top << " " << (betas[i]-top)/range_vertical << " " << (betas[i]-top)/range_vertical * height << endl;
+					cout << "Se le asigna: " << ranges[i] << endl;*/
+					//cout << cv_depth.image.rows << " " << cv_depth.image.cols << endl;
+					cv_depth.image.at<float>(pixel_y, pixel_x) = ranges[i];
+					//cout << "final" << endl;
+				}
+				//cv::imshow("Imagen recibida", cv_depth.image);
+       			//cv::waitKey(1);
 
-	//------------------------------------
-	// IMAGE+INFO CALLBACK
-	//------------------------------------
-    void image_callback(const sensor_msgs::msg::Image::ConstSharedPtr& img_msg, const sensor_msgs::msg::LaserScan::ConstSharedPtr& info_msg)
-    {
-		if (options.flag_verbose)
-			RCLCPP_INFO(this->get_logger(), "Pair of messages (image - info) received:");
+				//////TRASPUESTA
+				// Obtener la matriz de la imagen de entrada
+				/*Mat input_mat = cv_depth.image;
 
-		// Save header
-		header = img_msg->header;
+				// Obtener la traspuesta de la imagen
+				Mat transposed_mat = input_mat.t();
 
-		// Save image
-        cv_bridge::CvImagePtr cv_img = cv_bridge::toCvCopy(img_msg);
-        cv::cv2eigen(cv_img->image, input_img);
-		
+				// Crear una nueva imagen de OpenCV con la traspuesta
+				cv_bridge::CvImage transposed_image = std::make_shared<cv_bridge::CvImage>();
+				transposed_image->header = cv_depth->header;
+				transposed_image->encoding = cv_depth->encoding;
+				transposed_image->image = transposed_mat;
+				*/
 
-		// Save Sensor information
-		sensor.flag_linear_vert = true;
-		sensor.rows = info_msg->range_min;
-		sensor.cols = info_msg->range_max;
-	    sensor.hor_min = info_msg->angle_min;
-		sensor.hor_max = info_msg->angle_max;
-		sensor.ver_min = info_msg->ranges[0];
-		sensor.ver_max = info_msg->ranges[sensor.rows-1];
-		for (int i=0; i<sensor.rows; ++i)
-			sensor.ver_angles.push_back(info_msg->ranges[i]);
-
-		// Initialize when first data arrives
-		if (first_data)
-		{
-			// Initialize
-			first_data = false;
-			this->setSensorParameters(sensor);
-			this->setDepthInput(input_img);
-			this->initialize();
-
-			// Create header in results file
-			if (options.flag_save_results)
-				results_file << "#time \ttx \tty \ttz \tqx \tqy \tqz \tqw\n";
-
-		}
-		// Do the normal calculations
-		else
-		{
-			// Set input frame
-			this->setDepthInput(input_img);
-
-			// Odometry
-			this->runOdometry();
-
-			// Display execution time
-			if (options.flag_verbose)
-			{
-				RCLCPP_INFO(this->get_logger(), "Frame: %li", this->number_frames);
-				RCLCPP_INFO(this->get_logger(), "Execution time: %f ms", this->execution_time);
-				RCLCPP_INFO(this->get_logger(), "Average execution time: %f ms:", this->avg_exec_time);
-				RCLCPP_INFO(this->get_logger(), "\t-Flatness: %f ms", this->avg_time_bd(0));
-				RCLCPP_INFO(this->get_logger(), "\t-Quadtree: %f ms", this->avg_time_bd(1));
-				RCLCPP_INFO(this->get_logger(), "\t-Plane fitting: %f ms", this->avg_time_bd(2));
-				RCLCPP_INFO(this->get_logger(), "\t-Labeling: %f ms", this->avg_time_bd(3));
-				RCLCPP_INFO(this->get_logger(), "\t-Culling: %f ms", this->avg_time_bd(4));
-				RCLCPP_INFO(this->get_logger(), "\t-Ground clustering: %f ms", this->avg_time_bd(5));
-				RCLCPP_INFO(this->get_logger(), "\t-Ground alignment: %f ms", this->avg_time_bd(6));
-				RCLCPP_INFO(this->get_logger(), "\t-Point matching: %f ms", this->avg_time_bd(7));
-				RCLCPP_INFO(this->get_logger(), "\t-Motion estimation: %f ms", this->avg_time_bd(8));
-				RCLCPP_INFO(this->get_logger(), "\t-Iterations: %f ms", this->avg_time_bd(9));
-				RCLCPP_INFO(this->get_logger(), "\t-Motion filter: %f ms\n", this->avg_time_bd(10));
-			}
-		}
-
-		// Get results
-		this->getPose(odom_pose);
-		this->getCovariance(odom_cov);
-		this->getPatches(szdata);
-
-		// Publish the results
-		publish_odometry(header, odom_pose, odom_cov);
-
-		/// Publish the patches
-		publish_patches(header, szdata);
-
-		// Save results to file
-		if (options.flag_save_results)
-		{
-			Quaternionf q(odom_pose.block<3,3>(0,0));
-			rclcpp::Time timestamp(header.stamp);
-			char timestr[20];
-			snprintf(timestr, sizeof(timestr), "%.9f", timestamp.seconds());
-			results_file << timestr << " "
-			 			 << odom_pose(0,3) << " " << odom_pose(1,3) << " " << odom_pose(2,3) << " "
-			 			 << q.vec()(0) << " " << q.vec()(1) << " " << q.vec()(2) << " " << q.w()
-						 << endl;
-		}
+				cout << "cambio imagen OpenCV a ROS" << endl;
+				if (!cv_depth.image.data)
+				{
+					RCLCPP_ERROR_STREAM(rclcpp::get_logger("cv_bridge"), "La imagen en cv_depth es nula.");
+					return;
+				}
+				cout << "Pre puntero" << endl;
+				auto image_msg_ptr = cv_depth.toImageMsg();
+				cout << "Post puntero" << endl;
+				if (!image_msg_ptr)
+				{
+					RCLCPP_ERROR_STREAM(rclcpp::get_logger("cv_bridge"), "Error al convertir la imagen a mensaje de imagen.");
+					return;
+				}
+///////
+				depth_msg = *image_msg_ptr;
+				//depth_msg = *(cv_depth.toImageMsg());
+				depth_msg.header = header;
+				depth_msg.encoding = sensor_msgs::image_encodings::TYPE_32FC1;
+				cout << "Mensaje: " << depth_msg.height << ", " << depth_msg.width << ", " << depth_msg.encoding << ", " << endl;
+				//rclcpp::sleep_for(std::chrono::seconds(1));
+				cout << "Conversion hecha, ahora a publicar" << endl;
+    			depth_pub_->publish(depth_msg);
+				//rclcpp::sleep_for(std::chrono::seconds(1));
+				cout << "Imagen to wapa subia" << endl;
+    		}
     }
-
 
 	//------------------------------------
 	// VARIABLES
 	//------------------------------------
 	// Variables
-	string topic = "/kitti";
-	bool first_data = true;
-	Eigen::MatrixXf input_img;
-	Eigen::Matrix4f odom_pose;
-	Eigen::MatrixXf odom_cov;
-	GNDLO_Lidar::SensorInfo sensor;
-	///
-	SizedData szdata;
+	string topic = "/ouster";
+	//bool first_data = true;
+	sensor_msgs::msg::PointCloud2 cloud;
+	int width;
+	int height;
 	
 	// Output results file
-	ofstream results_file;
+	//ofstream results_file;
 
 	// Declare publishers
 	std_msgs::msg::Header header;
-	rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_pub_;
-	rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
-	rclcpp::Publisher<gndlo::msg::Patches>::SharedPtr ptch_pub_;
+	rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr depth_pub_;
 
 	// Declare subscriptions and synchronizer
-	message_filters::Subscriber<sensor_msgs::msg::Image> image_sub_;
-	message_filters::Subscriber<sensor_msgs::msg::LaserScan> info_sub_;
-	std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::Image, sensor_msgs::msg::LaserScan>> sync_;
+	rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_sub_;
+	//std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::Image, sensor_msgs::msg::LaserScan>> sync_;
 	
 };
 
@@ -530,12 +244,12 @@ int main(int num_arg, char *argv[])
 	{
 		// Start ROS
 		//----------------------------------------------------------------------
-		cout << "GNDLO Odometry node: READY." << endl;
+		//cout << "GNDLO Odometry node: READY." << endl;
 	    rclcpp::init(num_arg, argv);
-		rclcpp::spin(std::make_shared<GNDLO_Node>());
+		rclcpp::spin(std::make_shared<Cloud2Depth_Node>());
 		rclcpp::shutdown();
 
-		cout << "GNDLO Odometry node: SHUTTING DOWN" << endl;
+		//cout << "GNDLO Odometry node: SHUTTING DOWN" << endl;
 
 		return 0;
 
