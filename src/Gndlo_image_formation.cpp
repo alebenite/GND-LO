@@ -133,19 +133,19 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 				cout << "Calculado rango, y angulos" << endl;
 				//posible control de tamaño de vector
 				float left = *std::min_element(alphas.begin(), alphas.end());//alphas[0];
-				float right = alphas[alphas.size() - 1];
+				float right = *std::max_element(alphas.begin(), alphas.end());//alphas[alphas.size() - 1];
 				float top = *std::min_element(betas.begin(), betas.end());//betas[0]; //mirar si es con primero y ultimo o con max y min
-				float down = betas[betas.size() - 1];
+				float down = *std::max_element(betas.begin(), betas.end());//betas[betas.size() - 1];
 
-				float range_horizontal = *std::max_element(alphas.begin(), alphas.end()) - *std::min_element(alphas.begin(), alphas.end());	//right - left;
-				float range_vertical = *std::max_element(betas.begin(), betas.end()) - *std::min_element(betas.begin(), betas.end()); 		//top-down;
+				float range_horizontal = right - left;//*std::max_element(alphas.begin(), alphas.end()) - *std::min_element(alphas.begin(), alphas.end());	//right - left;
+				float range_vertical = down - top;//*std::max_element(betas.begin(), betas.end()) - *std::min_element(betas.begin(), betas.end()); 		//top-down;
 				for (int i=0; i<betas.size();i++){
 					//cout << i << ": " << ranges[i] << ", " << alphas[i] << ", " << betas[i]<< endl;
 				}
 				//cout << "Horizontal: " << range_horizontal << ", (" << *std::min_element(alphas.begin(), alphas.end()) << ", " << *std::max_element(alphas.begin(), alphas.end()) << ")" << endl;
 				//cout << "Vertical: " <<  range_vertical << ", (" << *std::min_element(betas.begin(), betas.end()) << ", " << *std::max_element(betas.begin(), betas.end()) << ")" << endl;
 				for (int i = 0; i < ranges.size(); i++){
-					int pixel_x = static_cast<int>((alphas[i]-left)/range_horizontal * width);
+					int pixel_x = static_cast<int>((alphas[i]-left+M_PI)/range_horizontal * width)-1;
 					int pixel_y = static_cast<int>((betas[i]-top)/range_vertical * height);
 					if (alphas[i]-left == 0) {
 						pixel_x = 0;
@@ -153,14 +153,18 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 					if (betas[i]-top == 0) {
 						pixel_y = 0;
 					}
-					
+					if (pixel_x > width){pixel_x = pixel_x-width;}
+					if (pixel_y >= height){pixel_y = height-1;}
+					if (pixel_x >= width){pixel_x = width-1;}
 					//cv_depth.image(pixel_x, pixel_y) = ranges[i];
 					/*cout << "Iteracion " << i << " de " << ranges.size() << endl;
 					cout << "El pixel_x es " <<pixel_x << ", " << alphas[i]-left << " " << (alphas[i]-left)/range_horizontal << " " << (alphas[i]-left)/range_horizontal * width << endl;
 					cout << "El pixel_y es " <<pixel_y << ", " << betas[i]-top << " " << (betas[i]-top)/range_vertical << " " << (betas[i]-top)/range_vertical * height << endl;
 					cout << "Se le asigna: " << ranges[i] << endl;*/
 					//cout << cv_depth.image.rows << " " << cv_depth.image.cols << endl;
-					cv_depth.image.at<float>(pixel_y, pixel_x) = ranges[i];
+					if(pixel_y<0 || pixel_y>31 || pixel_x <0 || pixel_x > 1031){cout << "height: " << height << ", width: " << width << ", pixel y: " << pixel_y << ", pixel x_1: " << pixel_x << ", pixel x_2: " << width-pixel_x-1 << endl; }
+					cv_depth.image.at<float>(pixel_y, width-pixel_x-1) = ranges[i];
+					//cv_depth.image.at<float>(pixel_y, pixel_x) = ranges[i];
 					//cout << "final" << endl;
 				}
 				//cv::imshow("Imagen recibida", cv_depth.image);
