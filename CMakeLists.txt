@@ -87,6 +87,7 @@ file( GLOB LIB_HEADERS ${PROJECT_SOURCE_DIR}/include/${PROJECT_NAME}/*.h )
 # --------------------------------------
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Patches.msg"
+  "msg/Lidar3dSensorInfo.msg"
   DEPENDENCIES std_msgs ### std_msgs/Header
 )
 
