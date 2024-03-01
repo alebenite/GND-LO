@@ -1,8 +1,8 @@
 // ROS
 #include <rclcpp/rclcpp.hpp>
 #include <message_filters/subscriber.h>
-//#include <message_filters/time_synchronizer.h>
-//#include <sensor_msgs/pointcloud2.hpp>
+#include <message_filters/time_synchronizer.h>
+//#include <sensor_msgs/point_cloud2.hpp>
 #include "/opt/ros/humble/include/sensor_msgs/sensor_msgs/msg/point_cloud2.hpp"
 #include "/opt/ros/humble/include/sensor_msgs/sensor_msgs/point_cloud2_iterator.hpp"
 #include <cv_bridge/cv_bridge.h>
@@ -47,17 +47,16 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
     	qos.reliability(RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT);
 
 		// Create subscription to the cloud point
-		///cloud_sub_.subscribe(this, topic + "/cloud");
-		cloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(topic + "/points", qos, std::bind(&Cloud2Depth_Node::cloud_callback, this, std::placeholders::_1));
-    	//cloud_sub_.subscribe(this, "/cloud");
-		//cloud_sub_->registerCallback(std::bind(&Cloud2Depth_Node::cloud_callback, this, std::placeholders::_1, std::placeholders::_2));
-		//cloud_sub_.subscribe("/cloud", 10)
-		//info_sub_.subscribe(this, topic + "/range/sensor_info");
+		//cloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(topic + "/points", qos, std::bind(&Cloud2Depth_Node::cloud_callback, this, std::placeholders::_1));
+    	cloud_sub_.subscribe(this,topic + "/points");
+		depth_sub_.subscribe(this,topic + "/range_image");
 		
+		//auto i = sensor_msgs::
+		//info_sub_.subscribe(this, topic + "/range/sensor_info");
     	
 		// Synchronize subscribers
-		//sync_ = std::make_shared<message_filters::TimeSynchronizer<sensor_msgs::msg::Image, sensor_msgs::msg::LaserScan>>(image_sub_, info_sub_, 20);
-    	//sync_->registerCallback(std::bind(&GNDLO_Node::image_callback, this, std::placeholders::_1, std::placeholders::_2));
+		sync_ = std::make_shared<message_filters::TimeSynchronizer<sensor_msgs::msg::PointCloud2, sensor_msgs::msg::Image>>(cloud_sub_, depth_sub_, 10);
+    	sync_->registerCallback(std::bind(&Cloud2Depth_Node::cloud_callback, this, std::placeholders::_1, std::placeholders::_2));
 
     }
 
@@ -94,7 +93,7 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 	//------------------------------------
 	// Point cloud callback
 	//------------------------------------
-    void cloud_callback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& cloud_msg){
+    void cloud_callback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& cloud_msg, const sensor_msgs::msg::Image::ConstSharedPtr& image_msg){
 		cout << "Nube de puntos recibido" << endl;
     		if (true){ //Futuro flag creo
 				// Declaration
@@ -151,25 +150,28 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 				//cout << "Horizontal: " << range_horizontal << ", (" << *std::min_element(alphas.begin(), alphas.end()) << ", " << *std::max_element(alphas.begin(), alphas.end()) << ")" << endl;
 				//cout << "Vertical: " <<  range_vertical << ", (" << *std::min_element(betas.begin(), betas.end()) << ", " << *std::max_element(betas.begin(), betas.end()) << ")" << endl;
 				for (int i = 0; i < ranges.size(); i++){
-					int pixel_x = static_cast<int>((alphas[i]-left+M_PI)/range_horizontal * width)-1;///Cambiar M_PI a una variable
-					int pixel_y = static_cast<int>((betas[i]-top)/range_vertical * height);
+					//int pixel_x = std::round((alphas[i]-left+M_PI)/range_horizontal * width)-1;///Cambiar M_PI a una variable///static_cast<int> para truncar
+					//int pixel_y = std::round((betas[i]-top)/range_vertical * height);
+					//Version adaptada del code andres
+					int pixel_x = std::round((alphas[i]-left+M_PI)/range_horizontal * (width-1));
+					int pixel_y = std::round((betas[i]-top)/range_vertical * (height-1));
 					if (alphas[i]-left == 0) {
 						pixel_x = 0;
 					}
 					if (betas[i]-top == 0) {
 						pixel_y = 0;
 					}
-					if (pixel_x > width){pixel_x = pixel_x-width;}
-					if (pixel_y >= height){pixel_y = height-1;}
-					if (pixel_x >= width){pixel_x = width-1;}
+					if (pixel_x >= width){pixel_x = pixel_x-width;}
+					//if (pixel_y >= height){pixel_y = height-1;}
+					//if (pixel_x >= width){pixel_x = width-1;}
 					//cv_depth.image(pixel_x, pixel_y) = ranges[i];
 					/*cout << "Iteracion " << i << " de " << ranges.size() << endl;
 					cout << "El pixel_x es " <<pixel_x << ", " << alphas[i]-left << " " << (alphas[i]-left)/range_horizontal << " " << (alphas[i]-left)/range_horizontal * width << endl;
 					cout << "El pixel_y es " <<pixel_y << ", " << betas[i]-top << " " << (betas[i]-top)/range_vertical << " " << (betas[i]-top)/range_vertical * height << endl;
 					cout << "Se le asigna: " << ranges[i] << endl;*/
 					//cout << cv_depth.image.rows << " " << cv_depth.image.cols << endl;
-					if(pixel_y<0 || pixel_y>31 || pixel_x <0 || pixel_x > 1031){cout << "height: " << height << ", width: " << width << ", pixel y: " << pixel_y << ", pixel x_1: " << pixel_x << ", pixel x_2: " << width-pixel_x-1 << endl; }
-					if(cv_depth.image.at<float>(pixel_y, width-pixel_x-1) != 0) {cout << "Se está modificando un pixel ya modificado: (" << width-pixel_x-1 << ", " << pixel_y << ")" << endl;}
+					if(pixel_y<0 || pixel_y>=height || pixel_x <0 || pixel_x >= width){cout << "height: " << height << ", width: " << width << ", pixel y: " << pixel_y << ", pixel x_1: " << pixel_x << ", pixel x_2: " << width-pixel_x-1 << endl; }
+					//if(cv_depth.image.at<float>(pixel_y, width-pixel_x-1) != 0) {cout << "Se está modificando un pixel ya modificado: (" << width-pixel_x-1 << ", " << pixel_y << ")" << endl;}
 					cv_depth.image.at<float>(pixel_y, width-pixel_x-1) = ranges[i];
 					pixels_y.push_back(pixel_y);
 					//cv_depth.image.at<float>(pixel_y, pixel_x) = ranges[i];
@@ -180,7 +182,7 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 				pixels_y.erase(unique_pixels_y,pixels_y.end());
 				cout << pixels_y.size() << endl;
 				for(int i=0;i<pixels_y.size();i++){
-					cout << "Profundidad: " << cv_depth.image.at<float>(pixels_y[i], 100) << ", en el pixel: " << pixels_y[i] << endl;
+					//cout << "Profundidad: " << cv_depth.image.at<float>(pixels_y[i], 100) << ", en el pixel: " << pixels_y[i] << endl;
 				}
 				//cv::imshow("Imagen recibida", cv_depth.image);
        			//cv::waitKey(1);
@@ -224,12 +226,16 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 				info_pub_->publish(info_msg);
 				//rclcpp::sleep_for(std::chrono::seconds(1));
 				cout << "Imagen to wapa subia" << endl;
-				//validation(cloud_msg, depth_msg);
+				validation(depth_msg, image_msg);
     		}
     }
-	/*void validation (const sensor_msgs::msg::PointCloud2::ConstSharedPtr& original, const sensor_msgs::msg::Image){
-
-	}*/
+	void validation (const sensor_msgs::msg::Image& result, const sensor_msgs::msg::Image::ConstSharedPtr original){
+		float error = 0.0;
+		for (size_t i = 0; i < result.data.size(); ++i) {
+        	error += std::abs(result.data[i] - original->data[i]);
+    	}
+		cout << "Error absoluto total: " << error << endl;
+	}
 	//------------------------------------
 	// VARIABLES
 	//------------------------------------
@@ -254,8 +260,11 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 	rclcpp::Publisher<gndlo::msg::Lidar3dSensorInfo>::SharedPtr info_pub_;
 
 	// Declare subscriptions and synchronizer
-	rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_sub_;
-	//std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::Image, sensor_msgs::msg::LaserScan>> sync_;
+	//rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_sub_;///Esto es sin sync
+	//rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr depth_sub_;
+	message_filters::Subscriber<sensor_msgs::msg::Image> depth_sub_;
+	message_filters::Subscriber<sensor_msgs::msg::PointCloud2> cloud_sub_;
+	std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::PointCloud2, sensor_msgs::msg::Image>> sync_;
 	
 };
 
