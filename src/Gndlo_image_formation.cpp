@@ -2,6 +2,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <message_filters/subscriber.h>
 #include <message_filters/time_synchronizer.h>
+//#include <transport_hints.h>
 //#include <sensor_msgs/point_cloud2.hpp>
 #include "/opt/ros/humble/include/sensor_msgs/sensor_msgs/msg/point_cloud2.hpp"
 #include "/opt/ros/humble/include/sensor_msgs/sensor_msgs/point_cloud2_iterator.hpp"
@@ -45,11 +46,13 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 		//Creation of the QoS Polices
 		rclcpp::QoS qos(rclcpp::KeepLast(10));
     	qos.reliability(RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT);
+		rmw_qos_profile_t qos_profile = rmw_qos_profile_default;
+		qos_profile.reliability = RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT;
 
 		// Create subscription to the cloud point
 		//cloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(topic + "/points", qos, std::bind(&Cloud2Depth_Node::cloud_callback, this, std::placeholders::_1));
-    	cloud_sub_.subscribe(this,topic + "/points");
-		depth_sub_.subscribe(this,topic + "/range_image");
+    	cloud_sub_.subscribe(this,topic + "/points", qos_profile);
+		depth_sub_.subscribe(this,topic + "/range_image", qos_profile);
 		
 		//auto i = sensor_msgs::
 		//info_sub_.subscribe(this, topic + "/range/sensor_info");
@@ -153,14 +156,14 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 					//int pixel_x = std::round((alphas[i]-left+M_PI)/range_horizontal * width)-1;///Cambiar M_PI a una variable///static_cast<int> para truncar
 					//int pixel_y = std::round((betas[i]-top)/range_vertical * height);
 					//Version adaptada del code andres
-					int pixel_x = std::round((alphas[i]-left+M_PI)/range_horizontal * (width-1));
+					int pixel_x = std::round((alphas[i]-left+M_PI)/range_horizontal * (width)-1);
 					int pixel_y = std::round((betas[i]-top)/range_vertical * (height-1));
-					if (alphas[i]-left == 0) {
+					/*if (alphas[i]-left == 0) {
 						pixel_x = 0;
 					}
 					if (betas[i]-top == 0) {
 						pixel_y = 0;
-					}
+					}*/
 					if (pixel_x >= width){pixel_x = pixel_x-width;}
 					//if (pixel_y >= height){pixel_y = height-1;}
 					//if (pixel_x >= width){pixel_x = width-1;}
@@ -171,7 +174,7 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 					cout << "Se le asigna: " << ranges[i] << endl;*/
 					//cout << cv_depth.image.rows << " " << cv_depth.image.cols << endl;
 					if(pixel_y<0 || pixel_y>=height || pixel_x <0 || pixel_x >= width){cout << "height: " << height << ", width: " << width << ", pixel y: " << pixel_y << ", pixel x_1: " << pixel_x << ", pixel x_2: " << width-pixel_x-1 << endl; }
-					//if(cv_depth.image.at<float>(pixel_y, width-pixel_x-1) != 0) {cout << "Se está modificando un pixel ya modificado: (" << width-pixel_x-1 << ", " << pixel_y << ")" << endl;}
+					if(cv_depth.image.at<float>(pixel_y, width-pixel_x-1) != 0) {cout << "Se está modificando un pixel ya modificado: (" << width-pixel_x-1 << ", " << pixel_y << ")" << endl;}
 					cv_depth.image.at<float>(pixel_y, width-pixel_x-1) = ranges[i];
 					pixels_y.push_back(pixel_y);
 					//cv_depth.image.at<float>(pixel_y, pixel_x) = ranges[i];
@@ -233,8 +236,24 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 		float error = 0.0;
 		for (size_t i = 0; i < result.data.size(); ++i) {
         	error += std::abs(result.data[i] - original->data[i]);
+			//cout << "pixel " << i << " original: " << static_cast<int>(original->data[i]) << ", calculado: " << static_cast<int>(result.data[i]) << endl;
     	}
-		cout << "Error absoluto total: " << error << endl;
+		cout << "Error absoluto total: " << error << ", error medio por pixel: " << error/result.data.size() << endl;
+		cv_bridge::CvImagePtr cv_original = cv_bridge::toCvCopy(*original, sensor_msgs::image_encodings::TYPE_32FC1);
+        cv_bridge::CvImagePtr cv_transformed = cv_bridge::toCvCopy(result, sensor_msgs::image_encodings::TYPE_32FC1);
+		cv::Mat original_8bit;
+        cv_original->image.convertTo(original_8bit, CV_32F, 255.0 / 65535.0);
+
+		cv::Mat difference;
+        cv::absdiff(original_8bit, cv_transformed->image, difference);
+		cv::imshow("Original Depth Image", original_8bit);
+        cv::imshow("Transformed Depth Image", cv_transformed->image);
+        cv::imshow("Depth Image Difference", difference);
+        cv::waitKey(1); 
+
+		double sum_diff = cv::sum(difference)[0];
+		RCLCPP_INFO(this->get_logger(), "Suma de la diferencia de píxeles: %f, La media por pixel: %f, Suma total de la original: %f, Suma total de la transformada: %f", sum_diff, sum_diff/result.data.size(), cv::sum(original_8bit)[0], cv::sum(cv_transformed->image)[0]);
+
 	}
 	//------------------------------------
 	// VARIABLES
