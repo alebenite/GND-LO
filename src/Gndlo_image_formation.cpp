@@ -22,6 +22,7 @@
 #include <rcl_interfaces/msg/set_parameters_result.hpp>
 
 //DEBUGGER: ros2 run --prefix 'xterm -e gdb --args' gndlo Gndlo_image_formation 
+//catch throw para pillar excepciones que salen antes de que se ejecute del todo
 
 //using namespace Eigen;
 using namespace std;
@@ -43,33 +44,35 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 		// Save parameters in options
 		this->get_all_parameters();
 		
-		// Create publisher
-		topic = this->get_parameter("subs_topic").get_parameter_value().get<string>();
-		depth_pub_ = this->create_publisher<sensor_msgs::msg::Image>(topic + "/range/image", 10);
-		info_pub_ = this->create_publisher<gndlo::msg::Lidar3dSensorInfo>(topic + "/range/sensor_info", 10);
-
 		//Creation of the QoS Polices
-		rclcpp::QoS qos(rclcpp::KeepLast(10));
-    	qos.reliability(RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT);
 		rmw_qos_profile_t qos_profile = rmw_qos_profile_default;
 		qos_profile.reliability = RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT;
-std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::PointCloud2, sensor_msgs::msg::Image>> sync_;
+		rclcpp::QoS qos(rclcpp::KeepLast(10));
+    	qos.reliability(RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT);
+		
+		// Create publisher
+		topic = this->get_parameter("subs_topic").get_parameter_value().get<string>();
+		depth_pub_ = this->create_publisher<sensor_msgs::msg::Image>(topic + "/range/image", qos);
+		info_pub_ = this->create_publisher<gndlo::msg::Lidar3dSensorInfo>(topic + "/range/sensor_info", qos);
+		cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(topic + "/point_cloud", qos);
+
+//std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::PointCloud2, sensor_msgs::msg::Image>> sync_;
 		// Create subscription to the cloud point
 		//cloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(topic + "/points", qos, std::bind(&Cloud2Depth_Node::cloud_callback, this, std::placeholders::_1));
     	cloud_sub_.subscribe(this,topic + "/points", qos_profile);
 		depth_sub_.subscribe(this,topic + "/range_image", qos_profile);
+		info_sub_.subscribe(this,topic + "/range_sensor_info", qos_profile);
+		info_sub_.registerCallback(std::bind(&Cloud2Depth_Node::sensor_info_callback, this, std::placeholders::_1));
 		
 		//auto i = sensor_msgs::
 		//info_sub_.subscribe(this, topic + "/range/sensor_info");
     	
 		// Synchronize subscribers
-		///INPUT POINT CLOUD
-		//sync_ = std::make_shared<message_filters::TimeSynchronizer<sensor_msgs::msg::PointCloud2, sensor_msgs::msg::Image>>(cloud_sub_, depth_sub_, 10);
+		sync_ = std::make_shared<message_filters::TimeSynchronizer<sensor_msgs::msg::PointCloud2, sensor_msgs::msg::Image>>(cloud_sub_, depth_sub_, 10);
+		// INPUT CLOUD POINT
     	//sync_->registerCallback(std::bind(&Cloud2Depth_Node::cloud_callback, this, std::placeholders::_1, std::placeholders::_2));
-
-		///INPUT DEPTH IMAGE
-		sync_ = std::make_shared<message_filters::TimeSynchronizer<sensor_msgs::msg::PointCloud2, sensor_msgs::msg::Image, sensor_msgs::msg::LaserScan>>(cloud_sub_, depth_sub_, 10);
-		sync_->registerCallback(std::bind(&Cloud2Depth_Node::depth_callback, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+		// INPUT DEPTH IMAGE
+		sync_->registerCallback(std::bind(&Cloud2Depth_Node::depth_callback, this, std::placeholders::_1, std::placeholders::_2));
     }
 
   private:
@@ -92,6 +95,15 @@ std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::PointCloud2,
 		range.set__from_value(1).set__to_value(150).set__step(1);
 		descriptor.integer_range= {range};
 		this->declare_parameter("height", 32, descriptor);
+		frange.set__from_value(-M_PI).set__to_value(M_PI).set__step(0);
+		descriptor.floating_point_range= {frange};
+		this->declare_parameter("phi_start", -M_PI, descriptor);
+		this->declare_parameter("phi_end", M_PI, descriptor);
+		this->declare_parameter("theta_start", 0.3515, descriptor);
+		this->declare_parameter("theta_end", -0.37751472, descriptor);
+		frange.set__from_value(0).set__to_value(1000).set__step(0);
+		descriptor.floating_point_range= {frange};
+		this->declare_parameter("max_range", 150.0, descriptor);
 	}
 
 	// Get parameters
@@ -100,16 +112,116 @@ std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::PointCloud2,
 		// Set options
 		width = this->get_parameter("width").get_parameter_value().get<int>();
 		height = this->get_parameter("height").get_parameter_value().get<int>();
+		phi_start = this->get_parameter("phi_start").get_parameter_value().get<float>();
+		phi_end = this->get_parameter("phi_end").get_parameter_value().get<float>();
+		theta_start = this->get_parameter("theta_start").get_parameter_value().get<float>();
+		theta_end = this->get_parameter("theta_end").get_parameter_value().get<float>();
+		max_range = this->get_parameter("max_range").get_parameter_value().get<float>();
+	}
+
+	//------------------------------------
+	// sensor info callback
+	//------------------------------------
+	void sensor_info_callback(const sensor_msgs::msg::LaserScan::ConstSharedPtr& info_msg){
+		height = info_msg->range_min;
+		width = info_msg->range_max;
+		phi_start = info_msg->angle_min;
+		phi_end = info_msg->angle_max;
+		theta_ranges = info_msg->ranges;
 	}
 
 	//------------------------------------
 	// depth image callback
 	//------------------------------------
-	void depth_callback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& cloud_msg, const sensor_msgs::msg::Image::ConstSharedPtr& image_msg, const sensor_msgs::msg::LaserScan::ConstSharedPtr& info_msg){
+	void depth_callback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& cloud_msg, const sensor_msgs::msg::Image::ConstSharedPtr& image_msg){
 		cout << "Imagen recibida" << endl;
-		//Declaration
+		// Declarations
 		header = image_msg->header;
 		auto point_msg = sensor_msgs::msg::PointCloud2();
+		cv_bridge::CvImagePtr cv_depth = cv_bridge::toCvCopy(*image_msg, sensor_msgs::image_encodings::TYPE_32FC1);
+		sensor_msgs::PointCloud2Modifier point_field(point_msg);
+
+		cout << "Variables declaradas" << endl;
+		// Iterate over all pixels
+		std::vector<float> x, y, z;
+		int counter=0;
+		double max,min;
+		cv::minMaxLoc(cv_depth->image,&min,&max);
+		float prop = max_range/max;
+		///Se podria mejorar creo estableciendo que el tamaño de la point cloud tiene que ser respecto a la imagen pero quitando los valores con 0 que esos son donde no se ha detectado nada
+		for (float row=0; row < cv_depth->image.rows; row++){
+			for (float col=0; col < cv_depth->image.cols; col++){
+				//Obtain range and angles for every pixel to calculate x,y,z
+				float range = prop*cv_depth->image.at<float>(row,col); ///Aquí habría que cambiar cosas si la imagen tiene que ir de 0 a 255
+				float phi, theta;
+				phi = (phi_end-phi_start)*(col/cv_depth->image.cols)+phi_start; //Range of angles * horizontal percentaje of the pixel + the start angle
+				theta = (theta_end-theta_start)*(row/cv_depth->image.rows)+theta_start; //Range of angles * vertical percentaje of the pixel + the start angle
+				/*x[counter] = range * std::sin(theta) * std::cos(phi); ///version como mas eficiente
+				y[counter] = range * std::sin(theta) * std::sin(phi);
+				z[counter] = range * std::cos(theta);*/
+				x.push_back(range * std::sin(theta) * std::cos(phi));
+				y.push_back(range * std::sin(theta) * std::sin(phi));
+				z.push_back(range * std::cos(theta));
+				if(range>max){max=range;}
+				//cout << "Iteracion: " << counter << " Rango: " << range << ", phi: " << phi << ", theta: " << theta << ", valor: " << range * std::sin(theta) * std::cos(phi) << endl;
+			}
+		}
+		cout << "x y z calculados. tamaño total: " << x.size() << ", maximo: " << max << endl;
+		// Set the Point Fields
+		// Define the fields
+		point_field.setPointCloud2Fields(3,
+			"x", 1, sensor_msgs::msg::PointField::FLOAT32,// 1,
+			"y", 1, sensor_msgs::msg::PointField::FLOAT32,// 1,
+			"z", 1, sensor_msgs::msg::PointField::FLOAT32/*,// 1,
+			"intensity", 0, sensor_msgs::msg::PointField::FLOAT32,// 1,
+			"t", 0, sensor_msgs::msg::PointField::UINT32,// 1,
+			"reflectivity", 0, sensor_msgs::msg::PointField::UINT16,// 1,
+			"ring", 0, sensor_msgs::msg::PointField::UINT16,// 1,
+			"ambient", 0, sensor_msgs::msg::PointField::UINT16,// 1,
+			"range", 0, sensor_msgs::msg::PointField::UINT32//, 1*/
+		);
+		///Se podria mejorar creo estableciendo que el tamaño de la point cloud tiene que ser respecto a la imagen pero quitando los valores con 0 que esos son donde no se ha detectado nada
+		// Set the message values
+		point_msg.is_dense = true;
+		point_msg.is_bigendian = false;
+		point_msg.height = cv_depth->image.rows;
+		point_msg.width = cv_depth->image.cols;
+		// Total number of bytes per point
+		point_msg.point_step = 16; ///Ni idea de cuanto
+		point_msg.row_step = point_msg.point_step * point_msg.width;
+		point_msg.data.resize(point_msg.row_step);
+		// Data
+		cout << "Mensaje casi creado, falta meterle los datos" << endl;
+		/*sensor_msgs::PointCloud2Iterator<float> iter_x(point_msg, "x");
+		int aux = 0;
+		for(int i=0; iter_x != iter_x.end(); ++iter_x, i++){
+			iter_x[0] = x[i]; //x
+			iter_x[1] = y[i]; //y
+			iter_x[2] = z[i]; //z
+			iter_x[3] = 1.0; //intensity
+			iter_x[4] = 1;  //t
+			iter_x[5] = 1;  //refletivity
+			iter_x[6] = 1;  //ring
+			iter_x[7] = 1;  //ambient
+			iter_x[8] = 1;  //range
+			aux++;
+		}*/
+		for(int i=0; i < point_msg.height*point_msg.width; i++){
+			point_msg.data.push_back(x[i]); //x
+			point_msg.data.push_back(y[i]); //y
+			point_msg.data.push_back(z[i]); //z
+			/*point_msg.data.push_back(1.0); //intensity
+			point_msg.data.push_back(1); //t
+			point_msg.data.push_back(1); //reflectivity
+			point_msg.data.push_back(1); //ring
+			point_msg.data.push_back(1); //ambient
+			point_msg.data.push_back(1); //range	*/
+			cout << "(" << x[i] << ", " << y[i] << ", " << z[i] << ")" << endl;		
+		}
+		
+		cout << "Falta publicar" << endl;
+		cout << "Tamaño de fields: " << point_msg.fields.size() << ", tamaño de data: " << point_msg.data.size() << ", proporcion: " << point_msg.data.size()/point_msg.fields.size() << ", cantidad que se supone que hay: " << width*height << endl;
+		cloud_pub_->publish(point_msg);
 	}
 
 	//------------------------------------
@@ -118,13 +230,14 @@ std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::PointCloud2,
     void cloud_callback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& cloud_msg, const sensor_msgs::msg::Image::ConstSharedPtr& image_msg){
 		cout << "Nube de puntos recibido" << endl;
     		if (true){ //Futuro flag creo
-				// Declaration
+				// Declarations
     			header = cloud_msg->header;
 				auto depth_msg = sensor_msgs::msg::Image();
 				auto info_msg = gndlo::msg::Lidar3dSensorInfo();
 				cv_bridge::CvImage cv_depth;
-
+				///Aquie creoq ue se puede mejorar que como la nube de puntos tiene su height y su width imagino que podria actualizar el param desde ahi 
 				cout << "1111111111111111111" << endl;
+				//cout << "Tamaño de fields: " << cloud_msg->fields.size() << ", tamaño de data: " << cloud_msg->data.size() << ", proporcion: " << cloud_msg->data.size()/cloud_msg->fields.size() << ", cantidad que se supone que hay: " << width*height << endl;
 				//Inicialize de depth image as a matrix of 0's
 				cv::Mat algo (height, width, CV_32FC1, cv::Scalar(0.0));
 				algo.copyTo(cv_depth.image); //= cv::Mat(height, width, CV_32FC1, cv::Scalar(0.0));
@@ -145,7 +258,7 @@ std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::PointCloud2,
 					float x = iter_x[0];
 					float y = iter_x[1];
 					float z = iter_x[2];
-					//cout << "(" << x << ", " << y << ", " << z << ")" << endl;
+					cout << "(" << x << ", " << y << ", " << z << ")" << endl;
 
 					float denominator = std::sqrt(x*x + y*y + z*z); //If denominator equals 0 means that x and y and z are 0 which means that is a non usefull observation
 					if (denominator != 0){
@@ -201,7 +314,7 @@ std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::PointCloud2,
 					//cout << cv_depth.image.rows << " " << cv_depth.image.cols << endl;
 					if(pixel_y<0 || pixel_y>=height || pixel_x <0 || pixel_x >= width){cout << "height: " << height << ", width: " << width << ", pixel y: " << pixel_y << ", pixel x_1: " << pixel_x << ", pixel x_2: " << width-pixel_x-1 << endl; }
 					if(cv_depth.image.at<float>(pixel_y, width-pixel_x-1) != 0) {cout << "Se está modificando un pixel ya modificado: (" << width-pixel_x-1 << ", " << pixel_y << ")" << endl;}
-					cv_depth.image.at<float>(pixel_y, width-pixel_x-1) = ranges[i];
+					cv_depth.image.at<float>(pixel_y, width-pixel_x-1) = ranges[i]; ///AQUI, en caso de que la de andres sea con ranges y el resto sea con puntos de 0-255 habría que meter un flag
 					//if(ranges[i]>10){cout << "VALOR: " << ranges[i] << endl;}
 					pixels_y.push_back(pixel_y);
 					//cv_depth.image.at<float>(pixel_y, pixel_x) = ranges[i];
@@ -307,15 +420,20 @@ std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::PointCloud2,
         cv::imshow("Depth Image Difference", difference);
         cv::waitKey(1); */
 	}
+
 	//------------------------------------
 	// VARIABLES
 	//------------------------------------
 	// Variables
 	string topic = "/ouster";
-	//bool first_data = true;
 	sensor_msgs::msg::PointCloud2 cloud;
 	int width;
 	int height;
+	// Sensor info
+	float phi_start, phi_end;
+	float theta_start, theta_end;
+	float max_range;
+	std::vector<float> theta_ranges;
 	// Size image
 	float left;
 	float right;
@@ -329,6 +447,7 @@ std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::PointCloud2,
 	std_msgs::msg::Header header;
 	rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr depth_pub_;
 	rclcpp::Publisher<gndlo::msg::Lidar3dSensorInfo>::SharedPtr info_pub_;
+	rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_pub_;
 
 	// Declare subscriptions and synchronizer
 	//rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_sub_;///Esto es sin sync
@@ -336,10 +455,7 @@ std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::PointCloud2,
 	message_filters::Subscriber<sensor_msgs::msg::Image> depth_sub_;
 	message_filters::Subscriber<sensor_msgs::msg::PointCloud2> cloud_sub_;
 	message_filters::Subscriber<sensor_msgs::msg::LaserScan> info_sub_;
-	///INPUT POINT CLOUD
-	//std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::PointCloud2, sensor_msgs::msg::Image>> sync_;
-	///INPUT DEPTH IMAGE
-	std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::PointCloud2, sensor_msgs::msg::Image, sensor_msgs::msg::LaserScan>> sync_;
+	std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::PointCloud2, sensor_msgs::msg::Image>> sync_;
 };
 
 // ------------------------------------------------------
