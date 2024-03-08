@@ -54,7 +54,7 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 		topic = this->get_parameter("subs_topic").get_parameter_value().get<string>();
 		depth_pub_ = this->create_publisher<sensor_msgs::msg::Image>(topic + "/range/image", qos);
 		info_pub_ = this->create_publisher<gndlo::msg::Lidar3dSensorInfo>(topic + "/range/sensor_info", qos);
-		cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(topic + "/point_cloud", qos);
+		cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(topic + "/point_cloud", 10);
 
 //std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::PointCloud2, sensor_msgs::msg::Image>> sync_;
 		// Create subscription to the cloud point
@@ -70,9 +70,9 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 		// Synchronize subscribers
 		sync_ = std::make_shared<message_filters::TimeSynchronizer<sensor_msgs::msg::PointCloud2, sensor_msgs::msg::Image>>(cloud_sub_, depth_sub_, 10);
 		// INPUT CLOUD POINT
-    	//sync_->registerCallback(std::bind(&Cloud2Depth_Node::cloud_callback, this, std::placeholders::_1, std::placeholders::_2));
+    	sync_->registerCallback(std::bind(&Cloud2Depth_Node::cloud_callback, this, std::placeholders::_1, std::placeholders::_2));
 		// INPUT DEPTH IMAGE
-		sync_->registerCallback(std::bind(&Cloud2Depth_Node::depth_callback, this, std::placeholders::_1, std::placeholders::_2));
+		//sync_->registerCallback(std::bind(&Cloud2Depth_Node::depth_callback, this, std::placeholders::_1, std::placeholders::_2));
     }
 
   private:
@@ -99,11 +99,11 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 		descriptor.floating_point_range= {frange};
 		this->declare_parameter("phi_start", -M_PI, descriptor);
 		this->declare_parameter("phi_end", M_PI, descriptor);
-		this->declare_parameter("theta_start", 0.3515, descriptor);
+		this->declare_parameter("theta_start", 0.35116025, descriptor);
 		this->declare_parameter("theta_end", -0.37751472, descriptor);
 		frange.set__from_value(0).set__to_value(1000).set__step(0);
 		descriptor.floating_point_range= {frange};
-		this->declare_parameter("max_range", 150.0, descriptor);
+		this->declare_parameter("max_range", 130.0, descriptor);
 	}
 
 	// Get parameters
@@ -147,26 +147,27 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 		int counter=0;
 		double max,min;
 		cv::minMaxLoc(cv_depth->image,&min,&max);
-		float prop = max_range/max;
+		float prop = max_range/std::pow(2,15);
 		///Se podria mejorar creo estableciendo que el tamaño de la point cloud tiene que ser respecto a la imagen pero quitando los valores con 0 que esos son donde no se ha detectado nada
 		for (float row=0; row < cv_depth->image.rows; row++){
 			for (float col=0; col < cv_depth->image.cols; col++){
 				//Obtain range and angles for every pixel to calculate x,y,z
 				float range = prop*cv_depth->image.at<float>(row,col); ///Aquí habría que cambiar cosas si la imagen tiene que ir de 0 a 255
+				if (range == 0) {continue;} //
 				float phi, theta;
-				phi = (phi_end-phi_start)*(col/cv_depth->image.cols)+phi_start; //Range of angles * horizontal percentaje of the pixel + the start angle
+				phi = -(phi_end-phi_start)*(col/cv_depth->image.cols)-phi_start-desfase; //Range of angles * horizontal percentaje of the pixel + the start angle
 				theta = (theta_end-theta_start)*(row/cv_depth->image.rows)+theta_start; //Range of angles * vertical percentaje of the pixel + the start angle
 				/*x[counter] = range * std::sin(theta) * std::cos(phi); ///version como mas eficiente
 				y[counter] = range * std::sin(theta) * std::sin(phi);
 				z[counter] = range * std::cos(theta);*/
-				x.push_back(range * std::sin(theta) * std::cos(phi));
-				y.push_back(range * std::sin(theta) * std::sin(phi));
-				z.push_back(range * std::cos(theta));
-				if(range>max){max=range;}
+				x.push_back(range * std::cos(theta) * std::cos(phi));
+				y.push_back(range * std::cos(theta) * std::sin(phi));
+				z.push_back(range * std::sin(theta));
+				if(max>max_image){max_image=max;}
 				//cout << "Iteracion: " << counter << " Rango: " << range << ", phi: " << phi << ", theta: " << theta << ", valor: " << range * std::sin(theta) * std::cos(phi) << endl;
 			}
 		}
-		cout << "x y z calculados. tamaño total: " << x.size() << ", maximo: " << max << endl;
+		cout << "x y z calculados. tamaño total: " << x.size() << ", maximo: " << max_image << endl;
 		// Set the Point Fields
 		// Define the fields
 		point_field.setPointCloud2Fields(3,
@@ -182,48 +183,51 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 		);
 		///Se podria mejorar creo estableciendo que el tamaño de la point cloud tiene que ser respecto a la imagen pero quitando los valores con 0 que esos son donde no se ha detectado nada
 		// Set the message values
+		point_msg.header = header;
 		point_msg.is_dense = true;
 		point_msg.is_bigendian = false;
-		point_msg.height = cv_depth->image.rows;
-		point_msg.width = cv_depth->image.cols;
+		/*point_msg.height = cv_depth->image.rows;
+		point_msg.width = cv_depth->image.cols;*/
+		point_msg.height = 1;
+		point_msg.width = x.size();
 		// Total number of bytes per point
-		point_msg.point_step = 16; ///Ni idea de cuanto
+		point_msg.point_step = 12; ///Ni idea de cuanto
 		point_msg.row_step = point_msg.point_step * point_msg.width;
-		point_msg.data.resize(point_msg.row_step);
+		point_msg.data.resize(point_msg.row_step * point_msg.height);
 		// Data
 		cout << "Mensaje casi creado, falta meterle los datos" << endl;
-		/*sensor_msgs::PointCloud2Iterator<float> iter_x(point_msg, "x");
-		int aux = 0;
+		sensor_msgs::PointCloud2Iterator<float> iter_x(point_msg, "x");
+		//int aux = 0;
 		for(int i=0; iter_x != iter_x.end(); ++iter_x, i++){
 			iter_x[0] = x[i]; //x
 			iter_x[1] = y[i]; //y
 			iter_x[2] = z[i]; //z
-			iter_x[3] = 1.0; //intensity
+			/*iter_x[3] = 1.0; //intensity
 			iter_x[4] = 1;  //t
 			iter_x[5] = 1;  //refletivity
 			iter_x[6] = 1;  //ring
 			iter_x[7] = 1;  //ambient
-			iter_x[8] = 1;  //range
-			aux++;
-		}*/
-		for(int i=0; i < point_msg.height*point_msg.width; i++){
+			iter_x[8] = 1;  //range*/
+			//aux++;
+		}
+		/*for(int i=0; i < x.size(); i++){
 			point_msg.data.push_back(x[i]); //x
 			point_msg.data.push_back(y[i]); //y
 			point_msg.data.push_back(z[i]); //z
-			/*point_msg.data.push_back(1.0); //intensity
+			point_msg.data.push_back(1.0); //intensity
 			point_msg.data.push_back(1); //t
 			point_msg.data.push_back(1); //reflectivity
 			point_msg.data.push_back(1); //ring
 			point_msg.data.push_back(1); //ambient
-			point_msg.data.push_back(1); //range	*/
+			point_msg.data.push_back(1); //range	
 			cout << "(" << x[i] << ", " << y[i] << ", " << z[i] << ")" << endl;		
-		}
+		}*/
 		
 		cout << "Falta publicar" << endl;
 		cout << "Tamaño de fields: " << point_msg.fields.size() << ", tamaño de data: " << point_msg.data.size() << ", proporcion: " << point_msg.data.size()/point_msg.fields.size() << ", cantidad que se supone que hay: " << width*height << endl;
 		cloud_pub_->publish(point_msg);
 	}
-
+	// Posible opcion para cambiar de float a int en la imagen ya que le tengo metidos metros, se podrian poner a valores de los pixeles
 	//------------------------------------
 	// Point cloud callback
 	//------------------------------------
@@ -258,16 +262,16 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 					float x = iter_x[0];
 					float y = iter_x[1];
 					float z = iter_x[2];
-					cout << "(" << x << ", " << y << ", " << z << ")" << endl;
+					//cout << "(" << x << ", " << y << ", " << z << ")" << endl;
 
 					float denominator = std::sqrt(x*x + y*y + z*z); //If denominator equals 0 means that x and y and z are 0 which means that is a non usefull observation
 					if (denominator != 0){
 						ranges.push_back(std::sqrt(x*x + y*y + z*z)); 					//√x²+y²+z²
 						alphas.push_back(std::atan2(y, x)); 							//arctan(y/x)
 						if(std::abs(z/denominator) <= 1.0){
-							betas.push_back(std::acos(z/(std::sqrt(x*x + y*y + z*z))));	//arccos(z/range)
+							betas.push_back(std::asin(z/(std::sqrt(x*x + y*y + z*z))));	//arccos(z/range)
 							if(i/width-aux >= 0){
-								range_vec.push_back(std::acos(z/(std::sqrt(x*x + y*y + z*z))));
+								range_vec.push_back(std::asin(z/(std::sqrt(x*x + y*y + z*z))));
 								aux++;
 								//cout << i << ", " << aux*width << ", " << i/width-(aux*width) << endl;
 							}
@@ -279,13 +283,14 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 				}
 				cout << "Calculado rango, y angulos" << endl;
 				//posible control de tamaño de vector
-				left = *std::min_element(alphas.begin(), alphas.end());//alphas[0];
+				///Se puede en el futuro poner opcion para elegir entre ambos
+				/*left = *std::min_element(alphas.begin(), alphas.end());//alphas[0];
 				right = *std::max_element(alphas.begin(), alphas.end());//alphas[alphas.size() - 1];
-				top = *std::min_element(betas.begin(), betas.end());//betas[0]; //mirar si es con primero y ultimo o con max y min
-				down = *std::max_element(betas.begin(), betas.end());//betas[betas.size() - 1];
+				down = *std::min_element(betas.begin(), betas.end());//betas[0]; //mirar si es con primero y ultimo o con max y min
+				top = *std::max_element(betas.begin(), betas.end());//betas[betas.size() - 1];*/
 
 				float range_horizontal = right - left;//*std::max_element(alphas.begin(), alphas.end()) - *std::min_element(alphas.begin(), alphas.end());	//right - left;
-				float range_vertical = down - top;//*std::max_element(betas.begin(), betas.end()) - *std::min_element(betas.begin(), betas.end()); 		//top-down;
+				float range_vertical = top - down;//*std::max_element(betas.begin(), betas.end()) - *std::min_element(betas.begin(), betas.end()); 		//top-down;
 				/*for (int i=0; i<betas.size();i++){
 					cout << i << ": " << ranges[i] << ", " << alphas[i] << ", " << betas[i]<< endl;
 				}*/
@@ -295,26 +300,26 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 					//int pixel_x = std::round((alphas[i]-left+M_PI)/range_horizontal * width)-1;///Cambiar M_PI a una variable///static_cast<int> para truncar
 					//int pixel_y = std::round((betas[i]-top)/range_vertical * height);
 					//Version adaptada del code andres
-					int pixel_x = std::round((alphas[i]-left+M_PI)/range_horizontal * (width)-1);
-					int pixel_y = std::round((betas[i]-top)/range_vertical * (height-1));
+					int pixel_x = std::round((alphas[i]-left/*+desfase*/)/range_horizontal * (width-1));///raro
+					int pixel_y = std::round((-betas[i]+top)/range_vertical * (height-1));
 					/*if (alphas[i]-left == 0) {
 						pixel_x = 0;
 					}
-					if (betas[i]-top == 0) {
+					if (betas[i]-down == 0) {
 						pixel_y = 0;
 					}*/
-					if (pixel_x >= width){pixel_x = pixel_x-width;}
+					//if (pixel_x >= width){pixel_x = pixel_x-width;}
 					//if (pixel_y >= height){pixel_y = height-1;}
 					//if (pixel_x >= width){pixel_x = width-1;}
 					//cv_depth.image(pixel_x, pixel_y) = ranges[i];
 					/*cout << "Iteracion " << i << " de " << ranges.size() << endl;
 					cout << "El pixel_x es " <<pixel_x << ", " << alphas[i]-left << " " << (alphas[i]-left)/range_horizontal << " " << (alphas[i]-left)/range_horizontal * width << endl;
-					cout << "El pixel_y es " <<pixel_y << ", " << betas[i]-top << " " << (betas[i]-top)/range_vertical << " " << (betas[i]-top)/range_vertical * height << endl;
+					cout << "El pixel_y es " <<pixel_y << ", " << betas[i]-down << " " << (betas[i]-down)/range_vertical << " " << (betas[i]-down)/range_vertical * height << endl;
 					cout << "Se le asigna: " << ranges[i] << endl;*/
 					//cout << cv_depth.image.rows << " " << cv_depth.image.cols << endl;
-					if(pixel_y<0 || pixel_y>=height || pixel_x <0 || pixel_x >= width){cout << "height: " << height << ", width: " << width << ", pixel y: " << pixel_y << ", pixel x_1: " << pixel_x << ", pixel x_2: " << width-pixel_x-1 << endl; }
-					if(cv_depth.image.at<float>(pixel_y, width-pixel_x-1) != 0) {cout << "Se está modificando un pixel ya modificado: (" << width-pixel_x-1 << ", " << pixel_y << ")" << endl;}
-					cv_depth.image.at<float>(pixel_y, width-pixel_x-1) = ranges[i]; ///AQUI, en caso de que la de andres sea con ranges y el resto sea con puntos de 0-255 habría que meter un flag
+					if(pixel_y<0 || pixel_y>=height || pixel_x <0 || pixel_x >= width){cout << "alpha: " << alphas[i] << ", beta: " << betas[i] << ", pixel y: " << pixel_y << ", pixel x_1: " << pixel_x << /*", pixel x_2: " << width-pixel_x-1 <<*/ endl; }
+					//if(cv_depth.image.at<float>(pixel_y, width-pixel_x-1) != 0) {cout << "Se está modificando un pixel ya modificado: (" << width-pixel_x-1 << ", " << pixel_y << ")" << endl;}
+					cv_depth.image.at<float>(pixel_y, pixel_x) = ranges[i]; ///AQUI, en caso de que la de andres sea con ranges y el resto sea con puntos de 0-255 habría que meter un flag
 					//if(ranges[i]>10){cout << "VALOR: " << ranges[i] << endl;}
 					pixels_y.push_back(pixel_y);
 					//cv_depth.image.at<float>(pixel_y, pixel_x) = ranges[i];
@@ -407,7 +412,7 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 		cv::minMaxLoc(cv_transformed->image, &min_t, &max_t);
 		double sum_diff = cv::sum(difference)[0];
 		//RCLCPP_INFO(this->get_logger(), "Mayor distancia original: %f, mayor distancia transformada: %f, media original: %f, media transformada: %f", max_o, max_t, mean_o, mean_t);
-		//RCLCPP_INFO(this->get_logger(), "Suma de la diferencia de píxeles: %f\nLa media por pixel: %f\nLa mediana: %f\nEl máximo: %f\nEl mínimo: %f\nSuma total de la original: %f, Suma total de la transformada: %f", sum_diff, /*sum_diff/result.data.size()*/ mean_diff, std_dev[0], max_diff, min_diff, cv::sum(original_8bit)[0], cv::sum(cv_transformed->image)[0]);
+		RCLCPP_INFO(this->get_logger(), "Suma de la diferencia de píxeles: %f\nLa media por pixel: %f\nLa mediana: %f\nEl máximo: %f\nEl mínimo: %f\nSuma total de la original: %f, Suma total de la transformada: %f", sum_diff, /*sum_diff/result.data.size()*/ mean_diff, std_dev[0], max_diff, min_diff, cv::sum(original_8bit)[0], cv::sum(cv_transformed->image)[0]);
 
 		/*for (int i = 0; i < difference.rows; ++i) {
 			for (int j = 0; j < difference.cols; ++j) {
@@ -415,10 +420,10 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 			}
 			cout << endl;
 		}*/
-		/*cv::imshow("Original Depth Image", original_8bit);
+		cv::imshow("Original Depth Image", original_8bit);
         cv::imshow("Transformed Depth Image", cv_transformed->image);
         cv::imshow("Depth Image Difference", difference);
-        cv::waitKey(1); */
+        cv::waitKey(1); 
 	}
 
 	//------------------------------------
@@ -429,16 +434,18 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 	sensor_msgs::msg::PointCloud2 cloud;
 	int width;
 	int height;
+	float desfase=M_PI;
 	// Sensor info
 	float phi_start, phi_end;
 	float theta_start, theta_end;
 	float max_range;
+	float max_image=0.0;
 	std::vector<float> theta_ranges;
 	// Size image
-	float left;
-	float right;
-	float top;
-	float down;
+	float left = 0;
+	float right = -M_PI*2;
+	float top = 0.35116025;
+	float down = -0.37751472;
 	
 	// Output results file
 	//ofstream results_file;
