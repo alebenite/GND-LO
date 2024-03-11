@@ -44,6 +44,8 @@ find_package(cv_bridge REQUIRED)
 find_package(rcl_interfaces REQUIRED)
 find_package(OpenCV REQUIRED) ###
 find_package(rosidl_default_generators REQUIRED) ###
+find_package(pcl_ros REQUIRED) ###
+find_package(pcl_conversions REQUIRED) ###
 ###find_package(tutorial_interfaces REQUIRED) ###
 ###
 ###find_package(dynamic_reconfigure REQUIRED)
@@ -96,7 +98,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 # --------------------------------------
 set(ODOM_EXECUTABLE "${PROJECT_NAME}_odom")
 add_executable(${ODOM_EXECUTABLE} ${PROJECT_SOURCE_DIR}/src/main/Gndlo_main.cpp ${LIB_SOURCES} ${LIB_HEADERS})
-add_executable(Gndlo_image_formation ${PROJECT_SOURCE_DIR}/src/Gndlo_image_formation.cpp)
+add_executable(validator ${PROJECT_SOURCE_DIR}/src/Gndlo_transformation_validation.cpp)
+add_executable(transformation ${PROJECT_SOURCE_DIR}/src/Gndlo_image_formation.cpp)
 set_target_properties(${ODOM_EXECUTABLE} PROPERTIES INSTALL_RPATH_USE_LINK_PATH TRUE)
 
 # TARGET AND LINK
@@ -110,8 +113,8 @@ ament_target_dependencies( ${ODOM_EXECUTABLE}
 		nav_msgs
 		message_filters
 		cv_bridge)
-
-ament_target_dependencies(Gndlo_image_formation
+		
+ament_target_dependencies(validator
 		rclcpp
 		sensor_msgs
 		std_msgs
@@ -121,7 +124,20 @@ ament_target_dependencies(Gndlo_image_formation
 		cv_bridge
 		Eigen3
 		OpenCV
-)
+		)
+ament_target_dependencies(transformation
+		rclcpp
+		sensor_msgs
+		std_msgs
+		geometry_msgs
+		nav_msgs
+		message_filters
+		cv_bridge
+		Eigen3
+		OpenCV
+		pcl_ros
+		pcl_conversions
+		)
 		
 #Target custom messages
 ###rosidl_target_interfaces(${ODOM_EXECUTABLE} ${PROJECT_NAME} "rosidl_typesupport_cpp")
@@ -149,7 +165,8 @@ include_directories(include ${EIGEN3_INCLUDE_DIR})
 include_directories(${CERES_INCLUDE_DIRS})
 target_link_libraries(${ODOM_EXECUTABLE} ${CERES_LIBRARIES})
 ###
-target_link_libraries(Gndlo_image_formation ${PROJECT_NAME}__rosidl_typesupport_cpp ${OpenCV_LIBS} ${CERES_LIBRARIES})
+target_link_libraries(transformation ${PROJECT_NAME}__rosidl_typesupport_cpp ${OpenCV_LIBS} ${CERES_LIBRARIES})
+target_link_libraries(validator ${PROJECT_NAME}__rosidl_typesupport_cpp ${OpenCV_LIBS} ${CERES_LIBRARIES})
 
 
 # INSTALL
@@ -160,7 +177,8 @@ install(TARGETS ${ODOM_EXECUTABLE}
     RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 ###
-install(TARGETS Gndlo_image_formation DESTINATION lib/${PROJECT_NAME})
+install(TARGETS transformation DESTINATION lib/${PROJECT_NAME})
+install(TARGETS validator DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY launch
   DESTINATION share/${PROJECT_NAME})

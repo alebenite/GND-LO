@@ -103,7 +103,7 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 		this->declare_parameter("theta_end", -0.37751472, descriptor);
 		frange.set__from_value(0).set__to_value(1000).set__step(0);
 		descriptor.floating_point_range= {frange};
-		this->declare_parameter("max_range", 130.0, descriptor);
+		this->declare_parameter("max_range", 130.8, descriptor);
 	}
 
 	// Get parameters
@@ -155,8 +155,8 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 				float range = prop*cv_depth->image.at<float>(row,col); ///Aquí habría que cambiar cosas si la imagen tiene que ir de 0 a 255
 				if (range == 0) {continue;} //
 				float phi, theta;
-				phi = -(phi_end-phi_start)*(col/cv_depth->image.cols)-phi_start-desfase; //Range of angles * horizontal percentaje of the pixel + the start angle
-				theta = (theta_end-theta_start)*(row/cv_depth->image.rows)+theta_start; //Range of angles * vertical percentaje of the pixel + the start angle
+				phi = -(phi_end-phi_start)*(col/(cv_depth->image.cols))-phi_start-desfase; //Range of angles * horizontal percentaje of the pixel + the start angle
+				theta = (theta_end-theta_start)*(row/(cv_depth->image.rows-1))+theta_start; //Range of angles * vertical percentaje of the pixel + the start angle
 				/*x[counter] = range * std::sin(theta) * std::cos(phi); ///version como mas eficiente
 				y[counter] = range * std::sin(theta) * std::sin(phi);
 				z[counter] = range * std::cos(theta);*/
@@ -267,7 +267,9 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 					float denominator = std::sqrt(x*x + y*y + z*z); //If denominator equals 0 means that x and y and z are 0 which means that is a non usefull observation
 					if (denominator != 0){
 						ranges.push_back(std::sqrt(x*x + y*y + z*z)); 					//√x²+y²+z²
-						alphas.push_back(std::atan2(y, x)); 							//arctan(y/x)
+						float angle = std::atan2(y, x);
+						if (angle < 0.0) {angle = 2*M_PI+angle;}
+						alphas.push_back(angle); 										//arctan(y/x)
 						if(std::abs(z/denominator) <= 1.0){
 							betas.push_back(std::asin(z/(std::sqrt(x*x + y*y + z*z))));	//arccos(z/range)
 							if(i/width-aux >= 0){
@@ -300,7 +302,7 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 					//int pixel_x = std::round((alphas[i]-left+M_PI)/range_horizontal * width)-1;///Cambiar M_PI a una variable///static_cast<int> para truncar
 					//int pixel_y = std::round((betas[i]-top)/range_vertical * height);
 					//Version adaptada del code andres
-					int pixel_x = std::round((alphas[i]-left/*+desfase*/)/range_horizontal * (width-1));///raro
+					int pixel_x = std::round((alphas[i]-left/*+desfase*/)/range_horizontal * (width));///raro
 					int pixel_y = std::round((-betas[i]+top)/range_vertical * (height-1));
 					/*if (alphas[i]-left == 0) {
 						pixel_x = 0;
@@ -317,7 +319,8 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 					cout << "El pixel_y es " <<pixel_y << ", " << betas[i]-down << " " << (betas[i]-down)/range_vertical << " " << (betas[i]-down)/range_vertical * height << endl;
 					cout << "Se le asigna: " << ranges[i] << endl;*/
 					//cout << cv_depth.image.rows << " " << cv_depth.image.cols << endl;
-					if(pixel_y<0 || pixel_y>=height || pixel_x <0 || pixel_x >= width){cout << "alpha: " << alphas[i] << ", beta: " << betas[i] << ", pixel y: " << pixel_y << ", pixel x_1: " << pixel_x << /*", pixel x_2: " << width-pixel_x-1 <<*/ endl; }
+					if(pixel_y<0 || pixel_y>=height || pixel_x <0 || pixel_x >= width)
+					{cout << "Iteración: " << i << " alpha: " << alphas[i] << " " << (alphas[i] - left) << " " << range_horizontal  << ", beta: " << betas[i] << ", pixel y: " << pixel_y << ", pixel x_1: " << pixel_x << /*", pixel x_2: " << width-pixel_x-1 <<*/ endl; }
 					//if(cv_depth.image.at<float>(pixel_y, width-pixel_x-1) != 0) {cout << "Se está modificando un pixel ya modificado: (" << width-pixel_x-1 << ", " << pixel_y << ")" << endl;}
 					cv_depth.image.at<float>(pixel_y, pixel_x) = ranges[i]; ///AQUI, en caso de que la de andres sea con ranges y el resto sea con puntos de 0-255 habría que meter un flag
 					//if(ranges[i]>10){cout << "VALOR: " << ranges[i] << endl;}
@@ -381,7 +384,7 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 				info_pub_->publish(info_msg);
 				//rclcpp::sleep_for(std::chrono::seconds(1));
 				cout << "Imagen to wapa subia" << endl;
-				validation(depth_msg, image_msg);
+				//validation(depth_msg, image_msg);
     		}
     }
 	void validation (const sensor_msgs::msg::Image& result, const sensor_msgs::msg::Image::ConstSharedPtr original){
@@ -442,8 +445,8 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 	float max_image=0.0;
 	std::vector<float> theta_ranges;
 	// Size image
-	float left = 0;
-	float right = -M_PI*2;
+	float left = 2*M_PI;
+	float right = 0;
 	float top = 0.35116025;
 	float down = -0.37751472;
 	
