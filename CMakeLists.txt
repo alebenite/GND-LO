@@ -44,8 +44,9 @@ find_package(cv_bridge REQUIRED)
 find_package(rcl_interfaces REQUIRED)
 find_package(OpenCV REQUIRED) ###
 find_package(rosidl_default_generators REQUIRED) ###
-find_package(pcl_ros REQUIRED) ###
+###find_package(pcl_ros REQUIRED) ###
 find_package(pcl_conversions REQUIRED) ###
+find_package(PCL REQUIRED)###
 ###find_package(tutorial_interfaces REQUIRED) ###
 ###
 ###find_package(dynamic_reconfigure REQUIRED)
@@ -69,6 +70,11 @@ find_package(Ceres REQUIRED)
 include_directories(
  include/${PROJECT_NAME}
 )
+
+### PCL
+include_directories(${PCL_INCLUDE_DIRS})
+link_directories(${PCL_LIBRARY_DIRS})
+add_definitions(${PCL_DEFINITIONS})
 
 
 # CREATE LIBRARY
@@ -124,6 +130,8 @@ ament_target_dependencies(validator
 		cv_bridge
 		Eigen3
 		OpenCV
+		###pcl_ros
+		pcl_conversions
 		)
 ament_target_dependencies(transformation
 		rclcpp
@@ -135,8 +143,6 @@ ament_target_dependencies(transformation
 		cv_bridge
 		Eigen3
 		OpenCV
-		pcl_ros
-		pcl_conversions
 		)
 		
 #Target custom messages
@@ -166,7 +172,7 @@ include_directories(${CERES_INCLUDE_DIRS})
 target_link_libraries(${ODOM_EXECUTABLE} ${CERES_LIBRARIES})
 ###
 target_link_libraries(transformation ${PROJECT_NAME}__rosidl_typesupport_cpp ${OpenCV_LIBS} ${CERES_LIBRARIES})
-target_link_libraries(validator ${PROJECT_NAME}__rosidl_typesupport_cpp ${OpenCV_LIBS} ${CERES_LIBRARIES})
+target_link_libraries(validator ${PROJECT_NAME}__rosidl_typesupport_cpp ${OpenCV_LIBS} ${CERES_LIBRARIES} ${PCL_LIBRARIES})
 
 
 # INSTALL

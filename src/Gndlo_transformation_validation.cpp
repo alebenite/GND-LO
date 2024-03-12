@@ -12,10 +12,14 @@
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <cv_bridge/cv_bridge.h>
 #include <opencv2/highgui/highgui.hpp>
-#include <pcl/search/kdtree.h>
-#include <pcl/point_types.h>
+//#include <pcl/search/kdtree.h>
+//#include <pcl/point_types.h>
 #include <pcl/kdtree/kdtree_flann.h>
+//#include <pcl_ros/point_cloud.hpp>
 
+#include <pcl_conversions/pcl_conversions.h>
+//#include "/opt/ros/humble/include/pcl_conversions/pcl_conversions.h"
+//
 /// Reconfigure params
 #include <memory>
 #include <regex>
@@ -47,7 +51,7 @@ class Verification_Node : public rclcpp::Node
 		// Create subscription
 		topic = this->get_parameter("subs_topic").get_parameter_value().get<string>();    	
 		cloud_ori_sub_.subscribe(this,topic + "/points", qos_profile);
-		cloud_tra_sub_.subscribe(this,topic + "/cloud_point", qos_profile);
+		cloud_tra_sub_.subscribe(this,topic + "/point_cloud", qos_profile);
 		depth_ori_sub_.subscribe(this,topic + "/range_image", qos_profile);
 		depth_tra_sub_.subscribe(this,topic + "/range/image", qos_profile);
 		
@@ -63,6 +67,7 @@ class Verification_Node : public rclcpp::Node
   private:
 	
 	void depth_callback (const sensor_msgs::msg::Image::ConstSharedPtr& original, const sensor_msgs::msg::Image::ConstSharedPtr& result){
+		cout << "imanes de profundidad entrantes" << endl;
 		cv_bridge::CvImagePtr cv_original = cv_bridge::toCvCopy(*original, sensor_msgs::image_encodings::TYPE_32FC1);
         cv_bridge::CvImagePtr cv_transformed = cv_bridge::toCvCopy(*result, sensor_msgs::image_encodings::TYPE_32FC1);
 		cv::Mat original_8bit;
@@ -86,58 +91,89 @@ class Verification_Node : public rclcpp::Node
 		//RCLCPP_INFO(this->get_logger(), "Mayor distancia original: %f, mayor distancia transformada: %f, media original: %f, media transformada: %f", max_o, max_t, mean_o, mean_t);
 		RCLCPP_INFO(this->get_logger(), "Suma de la diferencia de píxeles: %f\nLa media por pixel: %f\nLa mediana: %f\nEl máximo: %f\nEl mínimo: %f\nSuma total de la original: %f, Suma total de la transformada: %f", sum_diff, /*sum_diff/result.data.size()*/ mean_diff, std_dev[0], max_diff, min_diff, cv::sum(original_8bit)[0], cv::sum(cv_transformed->image)[0]);
 
-		/*for (int i = 0; i < difference.rows; ++i) {
-			for (int j = 0; j < difference.cols; ++j) {
-				cout << "(" << i << ", " << j << "): " << difference.at<float>(i, j) << "  ";
-			}
-			cout << endl;
-		}*/
 		cv::imshow("Original Depth Image", original_8bit);
         cv::imshow("Transformed Depth Image", cv_transformed->image);
         cv::imshow("Depth Image Difference", difference);
         cv::waitKey(1); 
 	}
 	void cloud_callback (const sensor_msgs::msg::PointCloud2::ConstSharedPtr& original, const sensor_msgs::msg::PointCloud2::ConstSharedPtr& result){
+		cout << "Nubes de puntos entrantes" << endl;
 		// Convert sensor_msgs::PointCloud2 to PCL PointCloud
-    pcl::PointCloud<pcl::PointXYZ>::Ptr original_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-    pcl::fromROSMsg(*original, *original_cloud);
-	
+		/*pcl::PointCloud<pcl::PointXYZ>::Ptr original_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+		pcl::fromROSMsg(*original, *original_cloud);
+		
 
-    // Create KDTree for the result cloud
-    pcl::search::KdTree<pcl::PointXYZ>::Ptr kdtree(new pcl::search::KdTree<pcl::PointXYZ>);
-    kdtree->setInputCloud(original_cloud);
+		pcl::PointCloud<pcl::PointXYZ>::Ptr result_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+		pcl::fromROSMsg(*result, *result_cloud);*/
 
-    // Variables to store the total error
-    double total_error = 0.0;
-    int total_points = 0;
+		/*pcl::search::KdTree<pcl::PointXYZ>::Ptr kdtree(new pcl::search::KdTree<pcl::PointXYZ>);
+		kdtree->setInputCloud(result_cloud);*/
 
-    // Iterate through points in the result cloud
-    for (const auto &point_result : result->data) {
-        pcl::PointXYZ point_result_pcl;
-        pcl::fromROSMsg(point_result, point_result_pcl);
 
-        // Find the nearest point in the original cloud
-        pcl::PointXYZ point_nearest;
-        int index_nearest;
-        float squared_distance;
-        kdtree->nearestKSearch(point_result_pcl, 1, index_nearest, squared_distance);
-        point_nearest = original_cloud->points[index_nearest];
+		// From sensor_msgs::msg::PointCloud2::ConstSharedPtr to pcl::PointCloud<pcl::PointXYZ>::Ptr
+		pcl::PCLPointCloud2::Ptr original_aux (new pcl::PCLPointCloud2 ());
+		pcl::PointCloud<pcl::PointXYZ>::Ptr original_cloud (new pcl::PointCloud<pcl::PointXYZ>());
+		pcl_conversions::toPCL(*original, *original_aux);
+		cout << original_aux->data.size() << endl;
+		pcl::fromPCLPointCloud2(*original_aux, *original_cloud);
+		//cout << "Transformación hecha" << endl;
+		// Create KDTree for the result cloud
+		pcl::KdTreeFLANN<pcl::PointXYZ> kdtree;
+		kdtree.setInputCloud (original_cloud);
+		//cout << "Arbol creado" << endl;
+		// K nearest neighbor search
+		int K = 10;
+		std::vector<int> pointIdxKNNSearch(K);
+		std::vector<float> pointKNNSquaredDistance(K);
 
-        // Compute the error (squared Euclidean distance)
-        double error = pcl::squaredEuclideanDistance(point_result_pcl, point_nearest);
+		// Iterate all points from the result point cloud
+		auto result_cloud = sensor_msgs::msg::PointCloud2();
+		result_cloud = *result;
+		sensor_msgs::PointCloud2Iterator<float> iter_x(result_cloud, "x");
+		//cout << "Iterador creado" << endl;
+		/// Mirar de la doc el radiusSearch a ver como va
+		for(; iter_x != iter_x.end(); ++iter_x){
+			pcl::PointXYZ point (iter_x[0], iter_x[1], iter_x[2]);
+			//cout << "Busco" << endl;
+			if ( kdtree.nearestKSearch (point, K, pointIdxKNNSearch, pointKNNSquaredDistance) > 0 ) {
+				//cout << "He encontrado algo buscando" << endl;
+				for (std::size_t i = 0; i < pointIdxKNNSearch.size (); ++i)
+					std::cout << "    "  <<   (*original_cloud)[ pointIdxKNNSearch[i] ].x 
+							<< " " << (*original_cloud)[ pointIdxKNNSearch[i] ].y 
+							<< " " << (*original_cloud)[ pointIdxKNNSearch[i] ].z 
+							<< " (squared distance: " << pointKNNSquaredDistance[i] << ")" << std::endl;
+			}///////////////////////////////////////////////////////////// ME HE QUEDAO AQUI, TENGO QUE JUNTAR EL ERROR DE CADA PUNTO Y SUMAR HACER MEDIA, ETC.
+		}
+		/*ChatGPT
 
-        // Accumulate the error
-        total_error += error;
-        total_points++;
-    }
+		// Variables to store the total error
+		double total_error = 0.0;
+		int total_points = 0;
 
-    // Compute the average error
-    double average_error = total_error / total_points;
+		// Iterate through points in the original cloud
+		for (const auto &point_original : original_cloud->points) {
+			// Find the nearest point in the result cloud
+			pcl::PointXYZ point_nearest;
+			int index_nearest;
+			float squared_distance;
+			kdtree->nearestKSearch(point_original, 1, index_nearest, squared_distance);
+			point_nearest = result_cloud->points[index_nearest];
 
-    // Output the result or use it as needed
-    std::cout << "Total error: " << total_error << std::endl;
-    std::cout << "Total points: " << total_points << std::endl;
-    std::cout << "Average error: " << average_error << std::endl;
+			// Compute the error (squared Euclidean distance)
+			double error = pcl::squaredEuclideanDistance(point_original, point_nearest);
+
+			// Accumulate the error
+			total_error += error;
+			total_points++;
+		}
+
+		// Compute the average error
+		double average_error = total_error / total_points;
+
+		// Output the result or use it as needed
+		std::cout << "Total error: " << total_error << std::endl;
+		std::cout << "Total points: " << total_points << std::endl;
+		std::cout << "Average error: " << average_error << std::endl;*/
 	}
 
 	// Declaration of subscribers, synchronizers and variables
