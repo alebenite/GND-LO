@@ -122,7 +122,12 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 		width = info_msg->range_max;
 		phi_start = info_msg->angle_min;
 		phi_end = info_msg->angle_max;
-		theta_ranges = info_msg->ranges;
+		if (info_msg->ranges.size() != 0){ // If the sensor has no vector of thetas means that the angle theta changes linearly
+			theta_linear = false;
+			theta_ranges = info_msg->ranges;
+		} else{
+			theta_linear = true;
+		}
 	}
 
 	//------------------------------------
@@ -150,7 +155,11 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 
 				float phi, theta;
 				phi = -(phi_end-phi_start)*(col/(cv_depth->image.cols))-phi_start-desfase; //Range of angles * horizontal percentaje of the pixel + the start angle
-				theta = (theta_end-theta_start)*(row/(cv_depth->image.rows-1))+theta_start; //Range of angles * vertical percentaje of the pixel + the start angle
+				if (theta_linear){
+					theta = (theta_end-theta_start)*(row/(cv_depth->image.rows-1))+theta_start; //Range of angles * vertical percentaje of the pixel + the start angle
+				}else{
+					theta = theta_ranges[static_cast<int>(row)];
+				}
 
 				x.push_back(range * std::cos(theta) * std::cos(phi));
 				y.push_back(range * std::cos(theta) * std::sin(phi));
@@ -342,7 +351,11 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 	float theta_start, theta_end;
 	float max_range;
 	float max_image=0.0;
-	std::vector<float> theta_ranges;
+	bool theta_linear = false;
+	std::vector<float> theta_ranges {0.3511602455, 0.3291690969, 0.3070034154, 0.2844886681, 0.2614503219, 0.2382374429, 0.2148500309, 0.1909390202, 
+									0.1675516082, 0.1436405974, 0.1192059879, 0.0951204442, 0.0706858347, 0.0459021593, 0.0214675498, -0.0029670597, -0.0275762022, 
+									-0.0520108117, -0.0764454212, -0.1012290966, -0.1253146403, -0.149225651, -0.1731366618, -0.1968731396, -0.2204350845, 
+									-0.2439970294, -0.2668608426, -0.2895501229, -0.3120648703, -0.3342305518, -0.3560471674, -0.3775147172};
 	// Size image
 	float left = 2*M_PI;
 	float right = 0;

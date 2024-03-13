@@ -122,7 +122,7 @@ class Verification_Node : public rclcpp::Node
 		kdtree.setInputCloud (original_cloud);
 		//cout << "Arbol creado" << endl;
 		// K nearest neighbor search
-		int K = 10;
+		int K = 1;
 		std::vector<int> pointIdxKNNSearch(K);
 		std::vector<float> pointKNNSquaredDistance(K);
 
@@ -132,18 +132,27 @@ class Verification_Node : public rclcpp::Node
 		sensor_msgs::PointCloud2Iterator<float> iter_x(result_cloud, "x");
 		//cout << "Iterador creado" << endl;
 		/// Mirar de la doc el radiusSearch a ver como va
-		for(; iter_x != iter_x.end(); ++iter_x){
+		std::vector<float> errors(result_cloud.height*result_cloud.width); ///Imagino que esto es mas eficiente que pushback
+		for(int i = 0; iter_x != iter_x.end(); ++iter_x, i++){
 			pcl::PointXYZ point (iter_x[0], iter_x[1], iter_x[2]);
 			//cout << "Busco" << endl;
-			if ( kdtree.nearestKSearch (point, K, pointIdxKNNSearch, pointKNNSquaredDistance) > 0 ) {
-				//cout << "He encontrado algo buscando" << endl;
-				for (std::size_t i = 0; i < pointIdxKNNSearch.size (); ++i)
+			if ( kdtree.nearestKSearch(point, K, pointIdxKNNSearch, pointKNNSquaredDistance) > 0 ) {
+				errors[i] = pointKNNSquaredDistance[0];
+
+				/*for (std::size_t i = 0; i < pointIdxKNNSearch.size (); ++i)
 					std::cout << "    "  <<   (*original_cloud)[ pointIdxKNNSearch[i] ].x 
 							<< " " << (*original_cloud)[ pointIdxKNNSearch[i] ].y 
 							<< " " << (*original_cloud)[ pointIdxKNNSearch[i] ].z 
-							<< " (squared distance: " << pointKNNSquaredDistance[i] << ")" << std::endl;
-			}///////////////////////////////////////////////////////////// ME HE QUEDAO AQUI, TENGO QUE JUNTAR EL ERROR DE CADA PUNTO Y SUMAR HACER MEDIA, ETC.
+							<< " (squared distance: " << pointKNNSquaredDistance[i] << ")" << std::endl;*/
+			}
 		}
+		float MSE = std::accumulate(errors.begin(), errors.end(),0.0f)/errors.size();
+		float median_SE = errors[errors.size()/2];
+		cout << "Error cuadrático medio: " << MSE << ", mediana de los errores cuadráticos: " << median_SE << endl;
+		for (int i = 0; i<errors.size(); i++){
+			errors[i] = std::sqrt(errors[i]);
+		}
+		cout << "Error medio: " << std::accumulate(errors.begin(), errors.end(),0.0f)/errors.size() << ", mediana: " << errors[errors.size()/2] << endl;
 		/*ChatGPT
 
 		// Variables to store the total error
