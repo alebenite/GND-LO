@@ -12,7 +12,7 @@
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <cv_bridge/cv_bridge.h>
 #include <opencv2/highgui/highgui.hpp>
-#include "gndlo/msg/lidar3d_sensor_info.hpp"
+#include "transformer/msg/lidar3d_sensor_info.hpp"
 
 /// Reconfigure params
 #include <memory>
@@ -53,7 +53,7 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 		// Create publisher
 		topic = this->get_parameter("subs_topic").get_parameter_value().get<string>();
 		depth_pub_ = this->create_publisher<sensor_msgs::msg::Image>(topic + "/range/image", qos);
-		info_pub_ = this->create_publisher<gndlo::msg::Lidar3dSensorInfo>(topic + "/range/sensor_info", qos);
+		info_pub_ = this->create_publisher<transformer::msg::Lidar3dSensorInfo>(topic + "/range/sensor_info", qos);
 		cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(topic + "/point_cloud", 10);
 
 		// Create subscription to the cloud point
@@ -210,7 +210,7 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 				// Declarations
     			header = cloud_msg->header;
 				auto depth_msg = sensor_msgs::msg::Image();
-				auto info_msg = gndlo::msg::Lidar3dSensorInfo();
+				auto info_msg = transformer::msg::Lidar3dSensorInfo();
 				cv_bridge::CvImage cv_depth;
 				///Aquie creoq ue se puede mejorar que como la nube de puntos tiene su height y su width imagino que podria actualizar el param desde ahi 
 
@@ -365,7 +365,7 @@ class Cloud2Depth_Node : public rclcpp::Node//, public GNDLO_Lidar
 	// Declare publishers
 	std_msgs::msg::Header header;
 	rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr depth_pub_;
-	rclcpp::Publisher<gndlo::msg::Lidar3dSensorInfo>::SharedPtr info_pub_;
+	rclcpp::Publisher<transformer::msg::Lidar3dSensorInfo>::SharedPtr info_pub_;
 	rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_pub_;
 
 	// Declare subscriptions and synchronizer

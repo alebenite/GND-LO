@@ -47,6 +47,7 @@ find_package(rosidl_default_generators REQUIRED) ###
 ###find_package(pcl_ros REQUIRED) ###
 find_package(pcl_conversions REQUIRED) ###
 find_package(PCL REQUIRED)###
+find_package(transformer REQUIRED)
 ###find_package(tutorial_interfaces REQUIRED) ###
 ###
 ###find_package(dynamic_reconfigure REQUIRED)
@@ -95,7 +96,6 @@ file( GLOB LIB_HEADERS ${PROJECT_SOURCE_DIR}/include/${PROJECT_NAME}/*.h )
 # --------------------------------------
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Patches.msg"
-  "msg/Lidar3dSensorInfo.msg"
   DEPENDENCIES std_msgs ### std_msgs/Header
 )
 
@@ -118,7 +118,8 @@ ament_target_dependencies( ${ODOM_EXECUTABLE}
 		geometry_msgs
 		nav_msgs
 		message_filters
-		cv_bridge)
+		cv_bridge
+		transformer)
 		
 ament_target_dependencies(validator
 		rclcpp
@@ -143,6 +144,7 @@ ament_target_dependencies(transformation
 		cv_bridge
 		Eigen3
 		OpenCV
+		transformer
 		)
 		
 #Target custom messages

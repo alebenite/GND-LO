@@ -39,8 +39,8 @@
 		<param name="filter_kf" value="0." />
 		<param name="filter_pf" value="0." />
 
-		<param name="flag_save_results" value="false" />
-		<param name="results_file_name" value="/path/to/results.dat" />
+		<param name="flag_save_results" value="true" />
+		<param name="results_file_name" value="/home/alex/ros2_ws/results/results.dat" />
     </node>
 
 </launch>

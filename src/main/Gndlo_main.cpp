@@ -23,6 +23,8 @@
 /// Patches
 #include "gndlo/msg/patches.hpp"
 
+/// Lidar3dSensorInfo
+#include "transformer/msg/lidar3d_sensor_info.hpp"
 
 using namespace Eigen;
 using namespace std;
@@ -90,11 +92,11 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
     	info_sub_.subscribe(this, topic + "/range/sensor_info");
     	
 		// Synchronize subscribers
-		sync_ = std::make_shared<message_filters::TimeSynchronizer<sensor_msgs::msg::Image, sensor_msgs::msg::LaserScan>>(image_sub_, info_sub_, 20);
+		sync_ = std::make_shared<message_filters::TimeSynchronizer<sensor_msgs::msg::Image, transformer::msg::Lidar3dSensorInfo>>(image_sub_, info_sub_, 20);
     	sync_->registerCallback(std::bind(&GNDLO_Node::image_callback, this, std::placeholders::_1, std::placeholders::_2));
 
 		// Open file to save results
-		if (options.flag_save_results)
+		if (options.flag_save_results)///////Esto hay que ajustarlo para que se pueda modificar con el flag
 		{
 			if (options.results_file_name.size() < 5)
 			{
@@ -395,7 +397,7 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 	//------------------------------------
 	// IMAGE+INFO CALLBACK
 	//------------------------------------
-    void image_callback(const sensor_msgs::msg::Image::ConstSharedPtr& img_msg, const sensor_msgs::msg::LaserScan::ConstSharedPtr& info_msg)
+    void image_callback(const sensor_msgs::msg::Image::ConstSharedPtr& img_msg, const transformer::msg::Lidar3dSensorInfo::ConstSharedPtr& info_msg)
     {
 		if (options.flag_verbose)
 			RCLCPP_INFO(this->get_logger(), "Pair of messages (image - info) received:");
@@ -409,15 +411,15 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 		
 
 		// Save Sensor information
-		sensor.flag_linear_vert = true;
-		sensor.rows = info_msg->range_min;
-		sensor.cols = info_msg->range_max;
-	    sensor.hor_min = info_msg->angle_min;
-		sensor.hor_max = info_msg->angle_max;
-		sensor.ver_min = info_msg->ranges[0];
-		sensor.ver_max = info_msg->ranges[sensor.rows-1];
+		sensor.flag_linear_vert = info_msg->is_theta_linear;
+		sensor.rows = info_msg->rows;
+		sensor.cols = info_msg->cols;
+	    sensor.hor_min = info_msg->phi_start;
+		sensor.hor_max = info_msg->phi_end;
+		sensor.ver_min = info_msg->theta_start;
+		sensor.ver_max = info_msg->theta_end;
 		for (int i=0; i<sensor.rows; ++i)
-			sensor.ver_angles.push_back(info_msg->ranges[i]);
+			sensor.ver_angles.push_back(info_msg->theta_vec[i]);
 
 		// Initialize when first data arrives
 		if (first_data)
@@ -512,8 +514,8 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 
 	// Declare subscriptions and synchronizer
 	message_filters::Subscriber<sensor_msgs::msg::Image> image_sub_;
-	message_filters::Subscriber<sensor_msgs::msg::LaserScan> info_sub_;
-	std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::Image, sensor_msgs::msg::LaserScan>> sync_;
+	message_filters::Subscriber<transformer::msg::Lidar3dSensorInfo> info_sub_;
+	std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::Image, transformer::msg::Lidar3dSensorInfo>> sync_;
 	
 };
 
