@@ -123,38 +123,6 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 	}
 
   private:
-  	template<typename T>
-	static const std::unordered_map<std::string, T Options::*> optionsMap = {
-		{"num_threads", &Options::num_threads},
-		{"valid_ratio", &Options::valid_ratio},
-		{"flag_verbose", &Options::flag_verbose},
-		{"flag_flat_blur", &Options::flag_flat_blur},
-		{"flag_solve_backforth", &Options::flag_solve_backforth},
-		{"flag_filter", &Options::flag_filter},
-		{"select_radius", &Options::select_radius},
-		{"gaussian_sigma", &Options::gaussian_sigma},
-		{"quadtrees_avg", &Options::quadtrees_avg},
-		{"quadtrees_std", &Options::quadtrees_std},
-		{"quadtrees_min_lvl", &Options::quadtrees_min_lvl},
-		{"quadtrees_max_lvl", &Options::quadtrees_max_lvl},
-		{"count_goal", &Options::count_goal},
-		{"starting_size", &Options::starting_size},
-		{"ground_threshold_deg", &Options::ground_threshold_deg},
-		{"wall_threshold_deg", &Options::wall_threshold_deg},
-		{"iterations", &Options::iterations},
-		{"huber_loss", &Options::huber_loss},
-		{"trans_bound", &Options::trans_bound},
-		{"pix_threshold", &Options::pix_threshold},
-		{"trans_threshold", &Options::trans_threshold},
-		{"rot_threshold", &Options::rot_threshold},
-		{"filter_kd", &Options::filter_kd},
-		{"filter_pd", &Options::filter_pd},
-		{"filter_kf", &Options::filter_kf},
-		{"filter_pf", &Options::filter_pf},
-		{"flag_save_results", &Options::flag_save_results},
-		{"results_file_name", &Options::results_file_name}
-    	};
-  
 	//------------------------------------
 	// PARAMETERS
 	//------------------------------------
