@@ -40,7 +40,7 @@
 		<param name="filter_pf" value="0." />
 
 		<param name="flag_save_results" value="true" />
-		<param name="results_file_name" value="/home/alex/ros2_ws/results/results.dat" />
+		<param name="results_file_name" value="/home/alex/ros2_ws/results/results6.dat" />
     </node>
 
 </launch>

@@ -75,7 +75,7 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 				    ///if (it != optionsMap.end()){ options.*(it->second) = this->get_parameter(p.get_name()).get_parameter_value().get<p.get_type()>(); }
 				    ///std::invoke(p.get_name().c_str(), options) = this->get_parameter(p.get_name().c_str()).get_parameter_value().get<p.get_type()>();
 			        }
-			        ///get_all_parameters();
+			        get_all_parameters();
   			}
 		};
 		handle = param_handler_->add_parameter_event_callback(cb);
@@ -96,7 +96,7 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
     	sync_->registerCallback(std::bind(&GNDLO_Node::image_callback, this, std::placeholders::_1, std::placeholders::_2));
 
 		// Open file to save results
-		if (options.flag_save_results)///////Esto hay que ajustarlo para que se pueda modificar con el flag
+		if (options.flag_save_results)///////Esto hay que ajustarlo para que se pueda modificar con el flag. No funcionaba bien
 		{
 			if (options.results_file_name.size() < 5)
 			{
@@ -109,7 +109,7 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 				if (options.flag_verbose)
 					RCLCPP_INFO(this->get_logger(), "Saving results to ");
 					RCLCPP_INFO(this->get_logger(), options.results_file_name.c_str());
-				results_file.open(options.results_file_name);
+				results_file.open(options.results_file_name); 
 			}
 		}
     }
