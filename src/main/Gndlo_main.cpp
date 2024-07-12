@@ -109,7 +109,8 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 				if (options.flag_verbose)
 					RCLCPP_INFO(this->get_logger(), "Saving results to ");
 					RCLCPP_INFO(this->get_logger(), options.results_file_name.c_str());
-				results_file.open(options.results_file_name); 
+				//results_file.open(options.results_file_name);
+				results_file.open(options.results_file_name, std::ios::out | std::ios::app);
 			}
 		}
     }
@@ -136,90 +137,121 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 		
 		// Declare parameters
 			// ROS topic to subscribe
-		this->declare_parameter("subs_topic", "/kitti");
+		descriptor.description = "Where the node should subscribe for the input images and the sensor information. It should have this structure: /subs_topic/range/image, /subs_topic/range/sensor_info, where the first topic is sensor_msgs/Image and the second is sensor_msgs/LaserScan.";
+		this->declare_parameter("subs_topic", "/kitti", descriptor);
+		//this->declare_parameter("qos_reliability", "/kitti", descriptor);
+		//this->declare_parameter("qos_", "/kitti", descriptor);
+
+			// Flags
+		descriptor.description = "True to output in terminal some information about timing.";
+		this->declare_parameter("flag_verbose", true);
+		descriptor.description = "Wether or not to blur the flatness image (recommended: true).";
+		this->declare_parameter("flag_flat_blur", true);
+		descriptor.description = "Wether or not to use patches from both input scans. More accurate, but needs more time.";
+		this->declare_parameter("flag_solve_backforth", true);
+		descriptor.description = "Wether or not to filter the resulting motion estimation using previous instances of the movement.";
+		this->declare_parameter("flag_filter", true);
+			// Output
+		descriptor.description = "Wether the resulting poses should be saved in a Freiburg style .txt file.";
+		this->declare_parameter("flag_save_results", true);
+		descriptor.description = "File name of the results if the flag_save_results is set to true.";
+		this->declare_parameter("results_file_name", "");
 			// General
+		descriptor.description = "Number of threads used by Ceres solver";
 		range.set__from_value(1).set__to_value(64).set__step(1);
 		descriptor.integer_range= {range};
 		this->declare_parameter("num_threads", 8, descriptor);
+		descriptor.description = "Ratio (from 0 to 1) of valid pixels in a neighborhood to consider it a valid group of points.";
 		frange.set__from_value(0.0).set__to_value(1.0).set__step(0);
 		descriptor.floating_point_range= {frange};
 		this->declare_parameter("valid_ratio", 0.8, descriptor);
-			// Flags
-		this->declare_parameter("flag_verbose", true);
-		this->declare_parameter("flag_flat_blur", true);
-		this->declare_parameter("flag_solve_backforth", true);
-		this->declare_parameter("flag_filter", true);
 			// Gaussian filtering
+		descriptor.description = "Radius used in kernels to calculate the curvature and smooth the flatness image. radius = 1 means 3x3 blocks.";
 		range.set__from_value(0).set__to_value(15).set__step(1);
 		descriptor.integer_range= {range};
-		this->declare_parameter("select_radius", 6, descriptor);///Es un entero y no un float?
+		this->declare_parameter("select_radius", 6, descriptor);
+		descriptor.description = "Sigma used in gaussian kernels to blur flatness and obtain points. Set to -1 to make it based on the radius.";
 		frange.set__from_value(-1.0).set__to_value(4.0).set__step(0);
 		descriptor.floating_point_range= {frange};
-		///cout << descriptor << endl;
 		this->declare_parameter("gaussian_sigma", 0.5, descriptor);
 			// Quadtree selection
+		descriptor.description = "Threshold on the average of the quadtree blocks to select them as a patch. Higher means more (less flat) patches are selected).";
 		frange.set__from_value(0.0).set__to_value(2.0).set__step(0);
 		descriptor.floating_point_range= {frange};
 		this->declare_parameter("quadtrees_avg", 0.1, descriptor);
+		descriptor.description = "Threshold on the standard deviation of the quadtree blocks to divide them. Higher means blocks are divided less often.";
 		frange.set__from_value(0.0).set__to_value(2.0).set__step(0);
 		descriptor.floating_point_range= {frange};
 		this->declare_parameter("quadtrees_std", 0.015, descriptor);
+		descriptor.description = "Minimum level when performing quadtrees = 2^quadtrees_min_lvl. 1 means 2x2 blocks are also tested for selection.";
 		range.set__from_value(1).set__to_value(5).set__step(1);
 		descriptor.integer_range= {range};
 		this->declare_parameter("quadtrees_min_lvl", 2, descriptor);
+		descriptor.description = "Maximum level when performing quadtrees = 2^quadtrees_max_lvl. 5 means testing starts at 32x32 blocks.";
 		range.set__from_value(2).set__to_value(6).set__step(1);
 		descriptor.integer_range= {range};
 		this->declare_parameter("quadtrees_max_lvl", 5, descriptor);
 			// Orthog Culling
+		descriptor.description = "Goal of number of patches contributing to each principal direction. Higher means more patches are included for each direction.";
 		frange.set__from_value(0.0).set__to_value(200.0).set__step(0);
 		descriptor.floating_point_range= {frange};
 		this->declare_parameter("count_goal", 50., descriptor);
+		descriptor.description = "Starting block size when culling. 4 means blocks of 4x4 are included as the initial set, then smaller blocks are tested.";
 		range.set__from_value(0).set__to_value(100).set__step(1);
 		descriptor.integer_range= {range};
 		this->declare_parameter("starting_size", 4, descriptor);
 			// Ground clustering
+		descriptor.description = "Threshold on the angular difference (between patch and previous ground plane) to consider patch as ground, in degrees.";
 		frange.set__from_value(0.0).set__to_value(90.0).set__step(0);
 		descriptor.floating_point_range= {frange};
 		this->declare_parameter("ground_threshold_deg", 10., descriptor);
+		descriptor.description = "Threshold on the angular difference (between patch and previous ground plane) to consider patch as wall, in degrees.";
 		frange.set__from_value(0.0).set__to_value(90.0).set__step(0);
 		descriptor.floating_point_range= {frange};
 		this->declare_parameter("wall_threshold_deg", 60., descriptor);
 			// Solution
+		descriptor.description = "Maximum iterations on the update of the correspondences. It averages around 7 iterations per estimation.";
 		range.set__from_value(1).set__to_value(30).set__step(1);
 		descriptor.integer_range= {range};
 		this->declare_parameter("iterations", 5, descriptor);
+		descriptor.description = "Starting value of the huber loss function parameter. Gets substituted with MAD of residuals later.";
 		frange.set__from_value(0.0).set__to_value(5.0).set__step(0);
 		descriptor.floating_point_range= {frange};
 		this->declare_parameter("huber_loss", 3e-5, descriptor);
+		descriptor.description = "Maximum translation in any direction. Set to very high to ignore it.";
 		frange.set__from_value(0.0).set__to_value(200.0).set__step(0);
 		descriptor.floating_point_range= {frange};
 		this->declare_parameter("trans_bound", 1., descriptor);
 			// Convergence
+		descriptor.description = "Pixel difference threshold when updating correspondences to check convergence.";
 		frange.set__from_value(0.0).set__to_value(50.0).set__step(0);
 		descriptor.floating_point_range= {frange};
 		this->declare_parameter("pix_threshold", 5., descriptor);
+		descriptor.description = "Convergence threshold on the norm of the difference in translation.";
 		frange.set__from_value(0.0).set__to_value(0.5).set__step(0);
 		descriptor.floating_point_range= {frange};
 		this->declare_parameter("trans_threshold", 0.002, descriptor);
+		descriptor.description = "Convergence threshold on the norm of the difference in translation.";
 		frange.set__from_value(0.0).set__to_value(M_PI/90.0).set__step(0);
 		descriptor.floating_point_range= {frange};
 		this->declare_parameter("rot_threshold", 0.5*(M_PI/180.), descriptor);
 			// Filter
+		descriptor.description = "";
 		frange.set__from_value(0.0).set__to_value(2000.0).set__step(0);
 		descriptor.floating_point_range= {frange};
 		this->declare_parameter("filter_kd", 100., descriptor);
+		descriptor.description = "";
 		frange.set__from_value(0.0).set__to_value(12.0).set__step(0);
 		descriptor.floating_point_range= {frange};
 		this->declare_parameter("filter_pd", 0., descriptor);
+		descriptor.description = "";
 		frange.set__from_value(0.0).set__to_value(8.0).set__step(0);
 		descriptor.floating_point_range= {frange};
 		this->declare_parameter("filter_kf", 2., descriptor);
+		descriptor.description = "";
 		frange.set__from_value(0.0).set__to_value(4.0).set__step(0);
 		descriptor.floating_point_range= {frange};
 		this->declare_parameter("filter_pf", 1., descriptor);
-			// Output
-		this->declare_parameter("flag_save_results", true);
-		this->declare_parameter("results_file_name", "");
 	}
 
 	// Get parameters
