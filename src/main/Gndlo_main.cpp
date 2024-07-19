@@ -155,7 +155,7 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 		descriptor.description = "Wether the resulting poses should be saved in a Freiburg style .txt file.";
 		this->declare_parameter("flag_save_results", true);
 		descriptor.description = "File name of the results if the flag_save_results is set to true.";
-		this->declare_parameter("results_file_name", "");
+		this->declare_parameter("results_file_name", "/home/alex/ros2_ws/results/testData.dat");
 			// General
 		descriptor.description = "Number of threads used by Ceres solver";
 		range.set__from_value(1).set__to_value(64).set__step(1);
@@ -297,13 +297,6 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 		options.flag_save_results = this->get_parameter("flag_save_results").get_parameter_value().get<bool>();
 		options.results_file_name = this->get_parameter("results_file_name").get_parameter_value().get<string>();
 	}
-	
-	/// Reconfigure parameters
-	std::shared_ptr<rclcpp::ParameterEventHandler> param_handler_;
-  	std::shared_ptr<rclcpp::ParameterEventCallbackHandle> handle;
-  	///
-	gndlo::msg::Patches parche = gndlo::msg::Patches();
-
 
 
 	//------------------------------------
@@ -501,10 +494,16 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 	Eigen::MatrixXf odom_cov;
 	GNDLO_Lidar::SensorInfo sensor;
 	///
-	SizedData szdata;
+	SizedData szdata; // This is the actual patch
 	
 	// Output results file
 	ofstream results_file;
+
+	/// Reconfigure parameters
+	std::shared_ptr<rclcpp::ParameterEventHandler> param_handler_;
+  	std::shared_ptr<rclcpp::ParameterEventCallbackHandle> handle;
+  	///
+	gndlo::msg::Patches parche = gndlo::msg::Patches();
 
 	// Declare publishers
 	std_msgs::msg::Header header;
@@ -553,3 +552,4 @@ int main(int num_arg, char *argv[])
 		return -1;
 	}
 }
+

@@ -158,7 +158,7 @@ void GNDLO::obtainPoints(const Level & lvl, SizedData * szdata)
 		int u = szdata->px1[i](1);
 
 		// Check if pixel is valid
-		if ( v<ker_r || u<ker_r || v>rr-ker_r || u>cc-ker_r )
+		if ( v<ker_r || u<ker_r || v>=rr-ker_r || u>=cc-ker_r )
 		{
 			szdata->labels[i] = -1;
 			szdata->points[i] = Vector3f::Zero();
