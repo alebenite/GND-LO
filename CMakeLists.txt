@@ -2,8 +2,8 @@ cmake_minimum_required(VERSION 3.5)
 project(gndlo)
 
 ## Set CXX optimization flags
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0 -std=c++11")
-#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wpedantic -Wall -Wextra")
+##set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0 -std=c++11")       For debug
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wpedantic -Wall -Wextra")
 ## -mtune=native -march=native
 
 set(CMAKE_CXX_STANDARD 14) # We require C++ 14 or later
@@ -33,9 +33,7 @@ endif(1)
 # --------------------------------------
 # ROS packages
 find_package(ament_cmake REQUIRED)
-###find_package(ament_cmake_python REQUIRED)
 find_package(rclcpp REQUIRED)
-###find_package(rclpy REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
@@ -45,14 +43,9 @@ find_package(cv_bridge REQUIRED)
 find_package(rcl_interfaces REQUIRED)
 find_package(OpenCV REQUIRED) ###
 find_package(rosidl_default_generators REQUIRED) ###
-###find_package(pcl_ros REQUIRED) ###
 find_package(pcl_conversions REQUIRED) ###
 find_package(PCL REQUIRED)###
 find_package(transformer REQUIRED)
-###find_package(tutorial_interfaces REQUIRED) ###
-###
-###find_package(dynamic_reconfigure REQUIRED)
-###generate_dynamic_reconfigure_options(cfg/my_config.cfg)
 
 # DEPENDENCIES
 # --------------------------------------
@@ -132,7 +125,6 @@ ament_target_dependencies(validator
 		cv_bridge
 		Eigen3
 		OpenCV
-		###pcl_ros
 		pcl_conversions
 		)
 ament_target_dependencies(transformation
@@ -148,8 +140,7 @@ ament_target_dependencies(transformation
 		transformer
 		)
 		
-#Target custom messages
-###rosidl_target_interfaces(${ODOM_EXECUTABLE} ${PROJECT_NAME} "rosidl_typesupport_cpp")
+##Target custom messages
 rosidl_get_typesupport_target(${ODOM_EXECUTABLE} ${PROJECT_NAME} "rosidl_typesupport_cpp")
 
 
@@ -165,9 +156,6 @@ ament_target_dependencies( ${ODOM_EXECUTABLE} Eigen3)
 ament_export_dependencies(eigen3_cmake_module)
 ament_export_dependencies(Eigen3)
 
-###rcl_interfaces std_msgs
-###ament_export_dependencies(rcl_interfaces std_msgs)
-###ament_target_dependencies(rclcpp rcl_interfaces std_msgs)
 include_directories(include ${EIGEN3_INCLUDE_DIR})
 
 #Use Ceres

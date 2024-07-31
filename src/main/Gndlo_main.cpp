@@ -54,13 +54,9 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 		param_handler_ = std::make_shared<rclcpp::ParameterEventHandler>(this);
 		
 		auto cb = [this](const rcl_interfaces::msg::ParameterEvent & event) { 
-		// Look for any updates to parameters in "/a_namespace" as well as any parameter changes 
-		// to our own node ("this_node") 
+		// Look for any updates to parameters
 			std::regex re("(/gndlo*)"); 
-			///cout << "Entra evento" << event.node << endl;
 			if (regex_match(event.node, re)) {
-			        // You can also use 'get_parameters_from_event' to enumerate all changes that came
-			        // in on this event
 			        auto params = rclcpp::ParameterEventHandler::get_parameters_from_event(event);
 			        for (auto & p : params) {
 				  RCLCPP_INFO(
@@ -69,12 +65,7 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 				    p.get_name().c_str(),
 				    p.get_type_name().c_str(),
 				    p.value_to_string().c_str());
-	    			    ///options.*(p.get_name().c_str()) = this->get_parameter(p.get_name().c_str()).get_parameter_value().get<p.get_type()>();
-	    			    ///cout << optionsMap<double Options::*>.find("count_goal") << endl;
-				    ///auto it = optionsMap<double GNDLO::Options::*>::find("count_goal");
-				    ///if (it != optionsMap.end()){ options.*(it->second) = this->get_parameter(p.get_name()).get_parameter_value().get<p.get_type()>(); }
-				    ///std::invoke(p.get_name().c_str(), options) = this->get_parameter(p.get_name().c_str()).get_parameter_value().get<p.get_type()>();
-			        }
+					}
 			        get_all_parameters();
   			}
 		};
@@ -83,7 +74,6 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 		// Create publisher
 		pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("gndlo/odom_pose_cov", 10);
 		odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("gndlo/odom", 10);
-		///Que diferencia hay entre hacerlo asi y hacerlo como viene en la documentación? param_subscriber_ = std::make_shared<rclcpp::ParameterEventHandler>(this);
 		ptch_pub_ = this->create_publisher<gndlo::msg::Patches>("gndlo/patches", 10);
 
 		// Create subscription to image and info
@@ -109,7 +99,6 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 				if (options.flag_verbose)
 					RCLCPP_INFO(this->get_logger(), "Saving results to ");
 					RCLCPP_INFO(this->get_logger(), options.results_file_name.c_str());
-				//results_file.open(options.results_file_name);
 				results_file.open(options.results_file_name, std::ios::out | std::ios::app);
 			}
 		}
@@ -130,7 +119,7 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
   	// Declare parameters
 	void declare_all_parameters()
 	{
-		///Declaro el descriptor y el rango que voy a usar para los parametros
+		///Declare the descriptor and the range used for the parameters
 		rcl_interfaces::msg::ParameterDescriptor descriptor;
 		rcl_interfaces::msg::IntegerRange range;
 		rcl_interfaces::msg::FloatingPointRange frange;
@@ -139,8 +128,6 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 			// ROS topic to subscribe
 		descriptor.description = "Where the node should subscribe for the input images and the sensor information. It should have this structure: /subs_topic/range/image, /subs_topic/range/sensor_info, where the first topic is sensor_msgs/Image and the second is sensor_msgs/LaserScan.";
 		this->declare_parameter("subs_topic", "/kitti", descriptor);
-		//this->declare_parameter("qos_reliability", "/kitti", descriptor);
-		//this->declare_parameter("qos_", "/kitti", descriptor);
 
 			// Flags
 		descriptor.description = "True to output in terminal some information about timing.";
@@ -493,8 +480,7 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 	Eigen::Matrix4f odom_pose;
 	Eigen::MatrixXf odom_cov;
 	GNDLO_Lidar::SensorInfo sensor;
-	///
-	SizedData szdata; // This is the actual patch
+	SizedData szdata; /// This is the actual patch
 	
 	// Output results file
 	ofstream results_file;
@@ -502,7 +488,6 @@ class GNDLO_Node : public rclcpp::Node, public GNDLO_Lidar
 	/// Reconfigure parameters
 	std::shared_ptr<rclcpp::ParameterEventHandler> param_handler_;
   	std::shared_ptr<rclcpp::ParameterEventCallbackHandle> handle;
-  	///
 	gndlo::msg::Patches parche = gndlo::msg::Patches();
 
 	// Declare publishers
